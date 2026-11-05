@@ -12,7 +12,12 @@ struct TranscriptSegment: Identifiable, Codable, Sendable {
     var confidence: Double
 }
 
-enum LanguageHint: String { case auto, en, id, mixed }
+/// Global-ready: auto-detect any Whisper language (99 langs, like LiveLingo's 35+).
+/// Hint is a preference, not a lock: "auto" (default), ISO code ("en","id","es","zh","ar",…), or "mixed" (= auto + bilingual prompt hint, legacy behavior).
+enum LanguageHint: String { case auto, en, id, mixed
+    /// Arbitrary ISO code beyond the enum cases, e.g. "es", "zh", "ja".
+    static func custom(_ code: String) -> String { code.lowercased() }
+}
 
 /// VAD-gated chunker config: 250ms hangover, 400ms padding, 5-15s chunks.
 struct VADConfig {

@@ -17,6 +17,7 @@ You drifted off, got pulled into code, or the conversation moved fast. Instead o
 - **Hotkey panel** — press `⌥⌘R`, pick **Right now**, **What did I miss** (2m / 5m / 10m / since you looked), or **Ask** anything about the meeting so far.
 - **Live ears, private brain** — speech is transcribed on-device (Whisper, Apple Silicon). Only the transcript text for the window you requested is sent to your chosen LLM. Audio is never stored, never uploaded.
 - **Mixed English + Indonesian** — built for code-switching. Answers come back in the language you picked for the meeting.
+- **Global-ready (LiveLingo-style)** — same engine handles 30+ languages: auto-detect per chunk, code-switch mid-sentence without flipping settings, output in any language you pick. Indo was just the first test pair.
 
 ## Privacy first
 
