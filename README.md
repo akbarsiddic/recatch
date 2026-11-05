@@ -1,4 +1,6 @@
-# Meeting Radar *(working title)*
+# ReCatch
+
+Never ask “what did I miss?” again.
 
 A private, Mac-only companion that answers two questions on demand — without anyone else knowing you asked:
 
