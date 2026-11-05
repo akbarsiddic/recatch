@@ -7,6 +7,18 @@ import Combine
 /// Threading: MeetingStore (sqlite) is touched on MainActor only.
 final class AudioCaptureManager: ObservableObject {
     @Published var state: AppState = .idle
+    /// Live mic level 0...1 (decays on the watchdog tick). If this never moves, the mic is the problem.
+    @Published var level: Double = 0
+    /// Chunks the VAD emitted this meeting (capture is flowing).
+    @Published var chunkCount = 0
+    /// Transcribed segments persisted this meeting.
+    @Published var segmentCount = 0
+    /// When the last segment landed.
+    @Published var lastHeardAt: Date?
+    /// Whisper phase for the menu/panel ("Model ready", "Downloading model…", …).
+    @Published var modelLine = "Model not loaded"
+    /// “12 segments · last heard 4s ago” — refreshed on the watchdog tick.
+    @Published var heardLine = "Nothing heard yet"
     /// Raw chunks (debug UI). Persisted segments arrive via onSegment.
     var onChunk: (@Sendable (AudioChunk) -> Void)?
     var onSegment: (@Sendable (TranscriptSegment) -> Void)?
@@ -27,6 +39,9 @@ final class AudioCaptureManager: ObservableObject {
     var languageHint: LanguageHint = .mixed
     var retentionDays = 3
     var outputLanguage = "en"
+
+    /// Shared initial prompt line (reset + watchdog agree).
+    private static let idlePrompt = "Listening — talk to test the mic…"
 
     static func defaultDBPath() -> String {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -71,6 +86,8 @@ final class AudioCaptureManager: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, let st = self.store else { return }
                 try? st.insertSegment(seg)
+                self.segmentCount += 1
+                self.lastHeardAt = Date()
                 self.onSegment?(seg)
             }
         }
@@ -84,7 +101,10 @@ final class AudioCaptureManager: ObservableObject {
         let micCap = MicCapture(clock: clock)
         micCap.onChunk = { [weak self] c in
             self?.vadMic.feed(pcm: c.pcm16kMono, stream: .mic, meetingMs: c.meetingMs)
-            Task { @MainActor in self?.onChunk?(c) }
+            Task { @MainActor in
+                self?.level = PCM.rms(c.pcm16kMono)
+                self?.onChunk?(c)
+            }
         }
         do { try micCap.start() } catch { state = .error("Mic failed: \(error.localizedDescription)"); return }
         self.mic = micCap
@@ -99,11 +119,40 @@ final class AudioCaptureManager: ObservableObject {
             self.system = sys
         }
         state = .listening
-        watchdog = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in /* flag .noSignal if silent */ }
+        level = 0; chunkCount = 0; segmentCount = 0; lastHeardAt = nil
+        heardLine = Self.idlePrompt
+        // Preload the model now: waiting for the first VAD chunk would leave
+        // "Model not loaded" on screen for a quiet mic indefinitely.
+        modelLine = "Loading model…"
+        Task { await whisper.load() }
+        watchdog = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
+        }
     }
+
+    /// 1s tick: decay the meter, refresh model phase + heard line (drives menu/panel).
+    @MainActor
+    private func tick() {
+        level = max(0, level * 0.6)
+        Task { [weak self] in
+            guard let self else { return }
+            let line = await self.whisper.statusLine
+            await MainActor.run { [weak self] in self?.modelLine = line }
+        }
+        if segmentCount == 0 {
+            heardLine = chunkCount == 0 ? Self.idlePrompt : "Hearing sound, waiting on first transcript…"
+        } else if let last = lastHeardAt {
+            let ago = max(0, Int(Date().timeIntervalSince(last)))
+            heardLine = ago < 3 ? "\(segmentCount) segments · hearing you now" : "\(segmentCount) segments · last heard \(ago)s ago"
+        }
+    }
+
+    /// Engine phase for the panel (no string-sniffing). Actor hop.
+    func enginePhase() async -> TranscriptionPhase { await whisper.phase }
 
     /// VAD chunk → Whisper → pipeline (drops empty transcripts, never persists hallucinations).
     private func handleVADChunk(_ chunk: AudioChunk) {
+        Task { @MainActor in self.chunkCount += 1 }
         let hint = languageHint
         Task {
             do {

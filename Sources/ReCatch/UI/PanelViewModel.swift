@@ -20,6 +20,12 @@ final class PanelViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var verbose = false
     @Published var lastHeardMs: Int64?
+    /// Empty-state explainer set on every run ("Start listening first" vs "no speech yet" vs downloading).
+    @Published var emptyReason = "Start listening first — press Start listening in the menu, then ask again."
+
+    var meetingActive: () -> Bool = { false }
+    /// Engine phase without string-sniffing. Set by the app from WhisperKitEngine.phase.
+    var enginePhase: () async -> TranscriptionPhase = { .idle }
 
     var transcriptProvider: (Int) -> String = { _ in "" }
     var gatewayFor: (FeatureScope) -> (gateway: any LLMGateway, model: String, provider: LLMProvider)? = { _ in nil }
@@ -51,6 +57,7 @@ final class PanelViewModel: ObservableObject {
 
     private func execute() async {
         errorMessage = nil
+        emptyReason = ""
         result = ""
         isLoading = true
         defer { isLoading = false }
@@ -65,10 +72,26 @@ final class PanelViewModel: ObservableObject {
         let asOfDate = Date()
         asOf = Self.timeFmt.string(from: asOfDate)
 
-        guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            result = ""
-            return // view shows "No speech heard."
+        if !meetingActive() {
+            emptyReason = "Not listening yet — press Start listening in the menu, then ask again."
+            return
         }
+        switch await enginePhase() {
+        case .downloading:
+            emptyReason = "Downloading model (first run, ~2 GB) — answers appear once it's ready."
+        case .failed:
+            emptyReason = "Transcription model failed to load (offline?). Check connection, then ask again."
+        case .idle, .ready:
+            break
+        }
+
+        guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            if emptyReason.isEmpty {
+                emptyReason = "Listening, but no speech captured yet. Talk near the mic — if the menu level meter doesn't move, check Mic permission."
+            }
+            return
+        }
+        emptyReason = ""
         if mode == .ask, question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errorMessage = "Type a question first."
             return

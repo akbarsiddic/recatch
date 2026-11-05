@@ -11,18 +11,26 @@ final class VADChunker: @unchecked Sendable {
 
     init(config: VADConfig = VADConfig()) { self.config = config }
 
-    /// Feed 0.5s frames of 16k mono. Energy gate stands in for Silero until CoreML model ships.
+    /// Feed 16k mono frames of any length. Energy gate stands in for Silero until CoreML model ships.
+    /// Duration is derived from the sample count (16 samples = 1 ms), not assumed.
     func feed(pcm: [Int16], stream: AudioStream, meetingMs: Int64) {
         lock.lock(); defer { lock.unlock() }
-        let energy = pcm.reduce(0) { $0 + Int64($1) * Int64($1) } / Int64(max(1, pcm.count))
-        let isVoiced = energy > 2_000_000 // ~tuned placeholder; Silero replaces this
+        let frameMs = pcm.isEmpty ? 0 : pcm.count / 16
+        let energy = pcm.isEmpty ? 0 : pcm.reduce(0) { $0 + Int64($1) * Int64($1) } / Int64(pcm.count)
+        let isVoiced = energy > 800_000 // ~sensitive enough for laptop mics; Silero replaces this
         if voiced.isEmpty { chunkStartMs = meetingMs }
         if isVoiced {
             voiced.append(contentsOf: pcm)
             silenceMs = 0
         } else {
-            silenceMs += 500
-            if !voiced.isEmpty { voiced.append(contentsOf: pcm) } // 400ms padding
+            silenceMs += frameMs
+            // Cap trailing padding at ~400ms: without this a sub-2s utterance
+            // followed by long silence grows `voiced` unboundedly and never emits.
+            let paddingBudget = max(0, 400 - (silenceMs - frameMs))
+            if !voiced.isEmpty, paddingBudget > 0 {
+                let keep = min(pcm.count, paddingBudget * 16)
+                voiced.append(contentsOf: pcm.prefix(keep))
+            }
         }
         let secs = Double(voiced.count) / 16000.0
         if !voiced.isEmpty && (secs >= config.maxChunkSec || (silenceMs >= 1500 && secs >= 2)) {

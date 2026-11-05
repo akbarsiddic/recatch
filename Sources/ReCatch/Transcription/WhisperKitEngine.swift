@@ -13,15 +13,26 @@ actor WhisperKitEngine {
 
     func load() async {
         status = .loading
+        phase = .downloading
+        statusLine = "Downloading model (first run, ~2 GB)…"
         do {
             // Downloads on first run (~800 MB–2 GB); cached afterwards.
             let m = try await WhisperKit(model: modelName)
             self.model = m
+            statusLine = "Loading model…"
             status = .ready
+            phase = .ready
+            statusLine = "Model ready"
         } catch {
             status = .failed(error.localizedDescription)
+            phase = .failed
+            statusLine = "Model failed — offline? Will retry next chunk."
         }
     }
+
+    /// Human-readable phase for the menu/panel. Prefer `phase` over string-sniffing.
+    var statusLine = "Model not loaded"
+    var phase: TranscriptionPhase = .idle
 
     /// Returns (text, lang, langProb, confidence).
     /// Empty text (silence / filtered hallucination / unloaded model) is dropped upstream.
@@ -48,9 +59,13 @@ actor WhisperKitEngine {
 
         let results: [TranscriptionResult]
         do {
+            statusLine = "Transcribing…"
             results = try await model.runTranscribeTask(audioArray: floats, decodeOptions: opts)
+            statusLine = "Model ready"
         } catch {
             status = .failed(error.localizedDescription)
+            phase = .failed
+            statusLine = "Transcription failed — will retry next chunk."
             return ("", "en", 0, 0)
         }
         return Self.filtered(results)

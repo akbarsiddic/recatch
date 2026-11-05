@@ -62,4 +62,12 @@ enum PCM {
     static func to16kMonoInt16(_ mono: [Float], fromRate: Double) -> [Int16] {
         floatToInt16(resampleLinear(mono, from: fromRate, to: 16_000))
     }
+
+    /// RMS level 0...1 from Int16 PCM (×3 gain so laptop speech reads). Pure.
+    static func rms(_ pcm: [Int16]) -> Double {
+        guard !pcm.isEmpty else { return 0 }
+        var sum: Double = 0
+        for s in pcm { let v = Double(s) / 32768.0; sum += v * v }
+        return min(1, sqrt(sum / Double(pcm.count)) * 3)
+    }
 }

@@ -1,5 +1,11 @@
 import Foundation
 
+/// Transcription engine phase. Lives here (not WhisperKitEngine) so UI code
+/// can switch on it without importing WhisperKit.
+enum TranscriptionPhase: String, Sendable {
+    case idle, downloading, ready, failed
+}
+
 /// Pure transcription post-filter: no model, no dependencies — unit-testable.
 ///
 /// Drops no-speech, low-confidence and repeated-phrase hallucinations.
