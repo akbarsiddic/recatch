@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "MeetingRadar",
+    name: "ReCatch",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "MeetingRadar", targets: ["MeetingRadar"])
+        .executable(name: "ReCatch", targets: ["ReCatch"])
     ],
     dependencies: [
         // WhisperKit for on-device ASR (P0). Comment out if you want stub-only build.
@@ -14,12 +14,12 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "MeetingRadar",
+            name: "ReCatch",
             dependencies: [
                 .product(name: "WhisperKit", package: "WhisperKit"),
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
             ],
-            path: "Sources/MeetingRadar",
+            path: "Sources/ReCatch",
             linkerSettings: [.linkedLibrary("sqlite3")]
         )
     ]

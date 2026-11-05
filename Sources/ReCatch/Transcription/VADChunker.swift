@@ -1,17 +1,19 @@
 import Foundation
 
 /// VAD-gated chunker: accumulates voiced PCM, emits 5–15s chunks. One instance per stream.
-final class VADChunker {
+final class VADChunker: @unchecked Sendable {
+    private let lock = NSLock()
     private let config: VADConfig
     private var voiced: [Int16] = []
     private var silenceMs = 0
     private var chunkStartMs: Int64 = 0
-    var onChunk: ((AudioChunk, [Int16]) -> Void)?
+    var onChunk: (@Sendable (AudioChunk) -> Void)?
 
     init(config: VADConfig = VADConfig()) { self.config = config }
 
     /// Feed 0.5s frames of 16k mono. Energy gate stands in for Silero until CoreML model ships.
     func feed(pcm: [Int16], stream: AudioStream, meetingMs: Int64) {
+        lock.lock(); defer { lock.unlock() }
         let energy = pcm.reduce(0) { $0 + Int64($1) * Int64($1) } / Int64(max(1, pcm.count))
         let isVoiced = energy > 2_000_000 // ~tuned placeholder; Silero replaces this
         if voiced.isEmpty { chunkStartMs = meetingMs }
@@ -25,13 +27,14 @@ final class VADChunker {
         let secs = Double(voiced.count) / 16000.0
         if !voiced.isEmpty && (secs >= config.maxChunkSec || (silenceMs >= 1500 && secs >= 2)) {
             let out = voiced; voiced = []; silenceMs = 0
-            onChunk?(AudioChunk(stream: stream, pcm16kMono: [], meetingMs: chunkStartMs, sampleRate: 16000), out)
+            onChunk?(AudioChunk(stream: stream, pcm16kMono: out, meetingMs: chunkStartMs, sampleRate: 16000))
         }
     }
 
     func flush(stream: AudioStream, meetingMs: Int64) {
+        lock.lock(); defer { lock.unlock() }
         guard !voiced.isEmpty else { return }
         let out = voiced; voiced = []
-        onChunk?(AudioChunk(stream: stream, pcm16kMono: [], meetingMs: chunkStartMs, sampleRate: 16000), out)
+        onChunk?(AudioChunk(stream: stream, pcm16kMono: out, meetingMs: chunkStartMs, sampleRate: 16000))
     }
 }

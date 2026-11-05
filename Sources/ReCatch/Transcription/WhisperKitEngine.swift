@@ -1,7 +1,7 @@
 import Foundation
 
 /// On-device ASR via WhisperKit (largev3-turbo default). Falls back to stub until model downloads.
-final class WhisperKitEngine {
+actor WhisperKitEngine {
     enum Status { case unloaded, loading, ready, failed(String) }
     private(set) var status: Status = .unloaded
     var promptHint = "Rina, Akbar, staging, API, meeting in English campur Bahasa Indonesia."
@@ -15,10 +15,13 @@ final class WhisperKitEngine {
 
     /// Returns (text, lang, langProb, confidence). Never throws hallucinations upward unfiltered.
     func transcribe(_ pcm: [Int16], hint: LanguageHint) async throws -> (String, String, Double, Double) {
-        guard case .ready = status else { await load() ; return ("", "en", 0, 0) }
-        // Placeholder until WhisperKit wired on Mac. Real call:
+        if status != .ready, case .unloaded = status { await load() }
+        guard case .ready = status else { return ("", "en", 0, 0) }
+        let langHint: String = hint == .mixed ? promptHint : hint.rawValue
+        // Placeholder until WhisperKit wired on Mac. Real call uses langHint + promptHint:
         // let res = try await model.transcribe(audioArray: pcmFloat, decodeOptions: [...], promptHint: promptHint)
-        // Filter: drop noSpeechProb>0.6, avgLogProb<-1.0, repeated phrases.
+        _ = langHint // wired into decodeOptions on Mac (auto when .mixed)
+        // Filter: drop noSpeechProb>0.6, avgLogProb<-1.0, repeated phrases. Never insert empty text upstream.
         return ("", "en", 0.5, 0.5)
     }
 }

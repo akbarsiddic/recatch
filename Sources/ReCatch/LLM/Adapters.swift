@@ -33,7 +33,7 @@ struct OpenAICompatibleAdapter: LLMGateway {
                         req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
                     }
                     req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-                    req.addValue("MeetingRadar/1.0", forHTTPHeaderField: "HTTP-Referer")
+                    req.addValue("ReCatch/1.0", forHTTPHeaderField: "HTTP-Referer")
                     let body: [String: Any] = [
                         "model": options.model,
                         "messages": [["role": "user", "content": prompt]],

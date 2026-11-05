@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct MeetingRadarApp: App {
+struct ReCatchApp: App {
     @StateObject private var capture = AudioCaptureManager()
     @State private var showConsent = false
     @State private var consentOK = false
@@ -40,7 +40,7 @@ struct MeetingRadarApp: App {
 
     func dbURL() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MeetingRadar.sqlite")
+            .appendingPathComponent("ReCatch.sqlite")
     }
 }
 

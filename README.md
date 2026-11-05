@@ -54,8 +54,8 @@ Tip: use a cheap model for *Right now*, a stronger one for *Ask*. Set per-featur
 ## Install & run
 
 ```bash
-git clone git@github.com:akbarsiddic/meeting-radar.git
-cd meeting-radar
+git clone git@github.com:akbarsiddic/recatch.git
+cd recatch
 open Package.swift   # opens in Xcode → select My Mac → Run
 ```
 
@@ -71,12 +71,12 @@ open Package.swift   # opens in Xcode → select My Mac → Run
 
 ## Project layout
 
-- `Sources/MeetingRadar/Capture/` — ScreenCaptureKit system audio + mic, meeting clock
-- `Sources/MeetingRadar/Transcription/` — VAD, chunker, Whisper engine, language router
-- `Sources/MeetingRadar/LLM/` — provider-agnostic gateway + prompts
-- `Sources/MeetingRadar/Persistence/` — SQLite, retention janitor, Keychain
-- `Sources/MeetingRadar/UI/` — menu bar, hotkey panel, overlay, settings
-- `Sources/MeetingRadar/Nudges/` — quiet name-mention nudges (phased, off by default)
+- `Sources/ReCatch/Capture/` — ScreenCaptureKit system audio + mic, meeting clock
+- `Sources/ReCatch/Transcription/` — VAD, chunker, Whisper engine, language router
+- `Sources/ReCatch/LLM/` — provider-agnostic gateway + prompts
+- `Sources/ReCatch/Persistence/` — SQLite, retention janitor, Keychain
+- `Sources/ReCatch/UI/` — menu bar, hotkey panel, overlay, settings
+- `Sources/ReCatch/Nudges/` — quiet name-mention nudges (phased, off by default)
 
 ## Roadmap
 
