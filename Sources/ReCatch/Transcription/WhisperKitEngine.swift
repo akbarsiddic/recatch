@@ -7,9 +7,11 @@ actor WhisperKitEngine {
     enum Status { case unloaded, loading, ready, failed(String) }
     private(set) var status: Status = .unloaded
     var promptHint = "Rina, Akbar, staging, API, meeting in English campur Bahasa Indonesia."
-    var modelName = "openai_whisper-largev3-turbo"
+    var modelName = "openai_whisper-large-v3_turbo_954MB"
 
     private var model: WhisperKit?
+
+    func setModel(_ name: String) { modelName = name }
 
     func load() async {
         status = .loading
@@ -56,6 +58,7 @@ actor WhisperKitEngine {
         opts.logProbThreshold = -1.0
         opts.compressionRatioThreshold = 2.4
         opts.temperatureFallbackCount = 3
+        opts.skipSpecialTokens = true // never leak <|startoftranscript|> etc. into the transcript
 
         let results: [TranscriptionResult]
         do {
@@ -68,7 +71,14 @@ actor WhisperKitEngine {
             statusLine = "Transcription failed — will retry next chunk."
             return ("", "en", 0, 0)
         }
-        return Self.filtered(results)
+        let out = Self.filtered(results)
+        if out.0.isEmpty {
+            // Silent drops are the "nothing happens" complaint: say why.
+            statusLine = results.flatMap(\.segments).isEmpty
+                ? "Model ready — heard audio, no words detected."
+                : "Model ready — last chunk unclear, skipped."
+        }
+        return out
     }
 
     /// Join kept segments; drop no-speech / low-confidence / repeated-phrase junk.
