@@ -135,12 +135,43 @@ final class MeetingStore {
         }.joined(separator: "\n")
     }
 
-    func logLLM(provider: String, model: String, tokensIn: Int, tokensOut: Int, windowSec: Int) throws {
-        try run("""
+    func logLLM(provider: String, model: String, tokensIn: Int, tokensOut: Int, windowSec: Int) throws {        try run("""
             INSERT INTO llm_log(id,t,provider,model,tokens_in,tokens_out,window_sec)
             VALUES(?,?,?,?,?,?,?);
             """, [UUID().uuidString, Int64(Date().timeIntervalSince1970 * 1000),
                   provider, model, tokensIn, tokensOut, windowSec])
+    }
+
+    struct LLMLogEntry: Sendable {
+        let t: Int64
+        let provider: String
+        let model: String
+        let tokensIn: Int
+        let tokensOut: Int
+        let windowSec: Int
+    }
+
+    /// What left this Mac (timestamp + size only, never content). Newest first.
+    func fetchLLMLog(limit: Int = 50) throws -> [LLMLogEntry] {
+        let sql = "SELECT t,provider,model,tokens_in,tokens_out,window_sec FROM llm_log ORDER BY t DESC LIMIT ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let s = stmt else {
+            throw NSError(domain: "Radar", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        defer { sqlite3_finalize(s) }
+        sqlite3_bind_int64(s, 1, Int64(limit))
+        var out: [LLMLogEntry] = []
+        while sqlite3_step(s) == SQLITE_ROW {
+            func text(_ col: Int32) -> String {
+                sqlite3_column_text(s, col).map { String(cString: $0) } ?? ""
+            }
+            out.append(LLMLogEntry(t: sqlite3_column_int64(s, 0), provider: text(1), model: text(2),
+                                   tokensIn: Int(sqlite3_column_int64(s, 3)),
+                                   tokensOut: Int(sqlite3_column_int64(s, 4)),
+                                   windowSec: Int(sqlite3_column_int64(s, 5))))
+        }
+        return out
     }
 
     /// Hourly janitor: delete rows past expires_at + vacuum.

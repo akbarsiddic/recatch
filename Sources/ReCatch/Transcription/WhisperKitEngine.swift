@@ -1,27 +1,70 @@
 import Foundation
+import WhisperKit
 
-/// On-device ASR via WhisperKit (largev3-turbo default). Falls back to stub until model downloads.
+/// On-device ASR via WhisperKit (largev3-turbo). Falls back to empty (dropped by
+/// the pipeline) until the model downloads or if loading fails offline.
 actor WhisperKitEngine {
     enum Status { case unloaded, loading, ready, failed(String) }
     private(set) var status: Status = .unloaded
     var promptHint = "Rina, Akbar, staging, API, meeting in English campur Bahasa Indonesia."
+    var modelName = "openai_whisper-largev3-turbo"
+
+    private var model: WhisperKit?
 
     func load() async {
         status = .loading
-        // Real impl (Mac): import WhisperKit; self.model = try await WhisperKit(model: "openai_whisper-largev3-turbo")
-        // Keep lazy: download on first Start to avoid blocking install.
-        status = .ready
+        do {
+            // Downloads on first run (~800 MB–2 GB); cached afterwards.
+            let m = try await WhisperKit(model: modelName)
+            self.model = m
+            status = .ready
+        } catch {
+            status = .failed(error.localizedDescription)
+        }
     }
 
-    /// Returns (text, lang, langProb, confidence). Never throws hallucinations upward unfiltered.
+    /// Returns (text, lang, langProb, confidence).
+    /// Empty text (silence / filtered hallucination / unloaded model) is dropped upstream.
     func transcribe(_ pcm: [Int16], hint: LanguageHint) async throws -> (String, String, Double, Double) {
         if case .unloaded = status { await load() }
-        guard case .ready = status else { return ("", "en", 0, 0) }
-        let langHint: String = hint == .mixed ? promptHint : hint.rawValue
-        // Placeholder until WhisperKit wired on Mac. Real call uses langHint + promptHint:
-        // let res = try await model.transcribe(audioArray: pcmFloat, decodeOptions: [...], promptHint: promptHint)
-        _ = langHint // wired into decodeOptions on Mac (auto when .mixed)
-        // Filter: drop noSpeechProb>0.6, avgLogProb<-1.0, repeated phrases. Never insert empty text upstream.
-        return ("", "en", 0.5, 0.5)
+        guard case .ready = status, let model else { return ("", "en", 0, 0) }
+        guard !pcm.isEmpty else { return ("", "en", 0, 0) }
+
+        let floats = pcm.map { Float($0) / 32768.0 }
+        var opts = DecodingOptions()
+        switch hint {
+        case .mixed, .auto:
+            opts.language = nil // auto-detect per chunk (code-switch safe)
+        default:
+            opts.language = hint.rawValue
+        }
+        if hint == .mixed, let tokens = model.tokenizer?.encode(text: promptHint) {
+            opts.promptTokens = tokens
+        }
+        opts.noSpeechThreshold = 0.6
+        opts.logProbThreshold = -1.0
+        opts.compressionRatioThreshold = 2.4
+        opts.temperatureFallbackCount = 3
+
+        let results: [TranscriptionResult]
+        do {
+            results = try await model.runTranscribeTask(audioArray: floats, decodeOptions: opts)
+        } catch {
+            status = .failed(error.localizedDescription)
+            return ("", "en", 0, 0)
+        }
+        return Self.filtered(results)
+    }
+
+    /// Join kept segments; drop no-speech / low-confidence / repeated-phrase junk.
+    /// Pure core lives in TranscriptionFilter (unit-tested without a model download).
+    static func filtered(_ results: [TranscriptionResult]) -> (String, String, Double, Double) {
+        let plain = results.flatMap(\.segments).map {
+            TranscriptionFilter.Segment(text: $0.text, noSpeechProb: $0.noSpeechProb, avgLogprob: $0.avgLogprob)
+        }
+        let lang = results.first?.language ?? "en"
+        let (text, lp, conf) = TranscriptionFilter.filter(plain)
+        guard !text.isEmpty else { return ("", "en", 0, 0) }
+        return (text, lang, lp, conf)
     }
 }

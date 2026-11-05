@@ -37,6 +37,18 @@ final class AudioCaptureManager: ObservableObject {
     @MainActor
     func startMeeting() async {
         state = .requestingPermissions
+        // Preflight: mic prompt inline; Screen Recording needs grant + relaunch.
+        if !PermissionsManager.micGranted() {
+            guard await PermissionsManager.requestMic() else {
+                state = .error("Mic denied — allow in System Settings → Privacy → Microphone.")
+                return
+            }
+        }
+        if !PermissionsManager.screenGranted() {
+            _ = PermissionsManager.requestScreen()
+            state = .error("Grant Screen Recording, then relaunch ReCatch. Mic-only until then is not started.")
+            return
+        }
         clock.start()
         let mid = UUID()
         do {
@@ -112,6 +124,26 @@ final class AudioCaptureManager: ObservableObject {
     func transcriptText(sinceMs: Int64 = 0) -> String {
         guard let mid = meetingId, let st = store else { return "" }
         return (try? st.transcriptText(meetingId: mid, sinceMs: sinceMs)) ?? ""
+    }
+
+    /// Windowed variant: secondsBack == 0 means the whole meeting.
+    @MainActor
+    func transcriptWindow(secondsBack: Int) -> String {
+        guard meetingId != nil else { return "" }
+        if secondsBack <= 0 { return transcriptText() }
+        let since = max(0, clock.nowMs() - Int64(secondsBack) * 1000)
+        return transcriptText(sinceMs: since)
+    }
+
+    /// Persist timestamp + size to llm_log (never content).
+    @MainActor
+    func logLLM(provider: String, model: String, tokensIn: Int, tokensOut: Int, windowSec: Int) {
+        try? store?.logLLM(provider: provider, model: model, tokensIn: tokensIn, tokensOut: tokensOut, windowSec: windowSec)
+    }
+
+    @MainActor
+    func llmLog(limit: Int = 50) -> [MeetingStore.LLMLogEntry] {
+        (try? store?.fetchLLMLog(limit: limit)) ?? []
     }
 
     @MainActor
