@@ -15,7 +15,7 @@ actor WhisperKitEngine {
 
     /// Returns (text, lang, langProb, confidence). Never throws hallucinations upward unfiltered.
     func transcribe(_ pcm: [Int16], hint: LanguageHint) async throws -> (String, String, Double, Double) {
-        if status != .ready, case .unloaded = status { await load() }
+        if case .unloaded = status { await load() }
         guard case .ready = status else { return ("", "en", 0, 0) }
         let langHint: String = hint == .mixed ? promptHint : hint.rawValue
         // Placeholder until WhisperKit wired on Mac. Real call uses langHint + promptHint:

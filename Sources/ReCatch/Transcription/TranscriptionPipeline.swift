@@ -10,6 +10,8 @@ actor TranscriptionPipeline {
 
     init(meetingId: UUID = UUID(), hint: LanguageHint = .mixed) { self.meetingId = meetingId; self.hint = hint }
 
+    func setOnSegment(_ h: (@Sendable (TranscriptSegment) -> Void)?) { onSegment = h }
+
     func ingest(_ chunk: AudioChunk, text: String, lang: String, confidence: Double) {
         let smooth = LanguageRouter.smoothed(current: lang, prob: confidence, history: langHistory)
         langHistory.append(smooth); if langHistory.count > 10 { langHistory.removeFirst() }

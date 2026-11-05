@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 @main
 struct ReCatchApp: App {
@@ -8,23 +9,23 @@ struct ReCatchApp: App {
 
     var body: some Scene {
         MenuBarExtra("Radar", systemImage: icon) {
-            Button(capture.state == .listening ? "Stop listening" : "Start listening") {
-                if capture.state == .listening { Task { await capture.stopMeeting() } }
-                else if consentOK { Task { await capture.startMeeting() } }
-                else { showConsent = true }
-            }
-            Divider()
-            Button("Delete everything now") { try? FileManager.default.removeItem(at: dbURL()) }
-            Divider()
-            SettingsLink(label: { Text("Settings…") })
-            QuitButton()
-        }
-        .sheet(isPresented: $showConsent) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("You’re responsible for complying with local rules and letting participants know you’re transcribing.").font(.headline)
+            if showConsent {
+                Text("You're responsible for complying with local rules and letting participants know you're transcribing.").font(.headline)
                 Text("Audio stays on this Mac. Only transcript text is sent to your chosen LLM for the window you request.").font(.body)
-                HStack { Spacer(); Button("Cancel") { showConsent = false }; Button("Start listening") { consentOK = true; showConsent = false; Task { await capture.startMeeting() } }.keyboardShortcut(.defaultAction) }
-            }.padding(20).frame(width: 420)
+                Button("Start listening") { consentOK = true; showConsent = false; Task { await capture.startMeeting() } }
+                Button("Cancel") { showConsent = false }
+            } else {
+                Button(capture.state == .listening ? "Stop listening" : "Start listening") {
+                    if capture.state == .listening { Task { await capture.stopMeeting() } }
+                    else if consentOK { Task { await capture.startMeeting() } }
+                    else { showConsent = true }
+                }
+                Divider()
+                Button("Delete everything now") { try? FileManager.default.removeItem(at: dbURL()) }
+                Divider()
+                SettingsLink(label: { Text("Settings…") })
+                Button("Quit ReCatch") { NSApplication.shared.terminate(nil) }
+            }
         }
         Settings { SettingsView() }
     }
