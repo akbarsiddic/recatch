@@ -32,9 +32,12 @@ final class RollingTranscriber {
 
     var config = Config()
     /// Injected ASR call: audio → text.
-    var transcribe: (([Int16]) async -> String)?
+    /// Returns the text and the language Whisper reported for this pass.
+    var transcribe: (([Int16]) async -> (text: String, lang: String))?
     var onPartial: ((String) -> Void)?
     var onFinal: ((String, AudioStream) -> Void)?
+    /// Language reported by each pass — the meeting language is voted from these.
+    var onLanguage: ((String) -> Void)?
 
     private var window: [Int16] = []
     /// Text of the most recent pass over `window`.
@@ -101,8 +104,9 @@ final class RollingTranscriber {
         let audio = window
         defer { busy = false }
         guard let transcribe else { return }
-        let text = await transcribe(audio)
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pass = await transcribe(audio)
+        onLanguage?(pass.lang)
+        let cleaned = pass.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
         if windowText.isEmpty { utteranceStartedAt = Date() }
         windowText = cleaned

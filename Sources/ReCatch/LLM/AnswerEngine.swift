@@ -60,7 +60,7 @@ final class AnswerEngine {
             throw AnswerError.empty("Downloading the speech model (first run) — answers appear once it's ready.")
         case .failed:
             throw AnswerError.empty("Speech model failed to load. Check your connection, then ask again.")
-        case .idle, .ready:
+        case .idle, .ready, .loading:
             break
         }
 

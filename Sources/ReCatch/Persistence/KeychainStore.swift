@@ -14,6 +14,12 @@ enum KeychainStore {
         SecItemAdd(add as CFDictionary, nil)
     }
 
+    /// Cheap existence check so a row can show "stored" without reading the secret.
+    static func has(provider: String) -> Bool {
+        guard let key = load(provider: provider) else { return false }
+        return !key.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     static func load(provider: String) -> String? {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.meetingradar.llm",

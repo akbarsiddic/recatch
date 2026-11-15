@@ -85,6 +85,7 @@ struct OverlayView: View {
                     .lineLimit(1)
             }
             Spacer()
+            languageChip
             Button {
                 model.expanded.toggle()
             } label: {
@@ -95,6 +96,26 @@ struct OverlayView: View {
             .foregroundStyle(.secondary)
             .help(model.expanded ? "Collapse" : "Expand")
         }
+    }
+
+    /// Same one-click language change as the dashboard, without leaving the meeting.
+    private var languageChip: some View {
+        Menu {
+            ForEach(SpokenLanguage.allCases) { l in
+                Button(l.title) { capture.applyLanguage(l) }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "globe").font(.system(size: 9, weight: .bold))
+                Text(capture.detectedLanguageTitle ?? AppSettings.shared.spokenLanguage.title)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Meeting language")
     }
 
     private var caption: some View {
@@ -164,8 +185,12 @@ struct OverlayView: View {
 
 /// Owns the floating NSPanel. One overlay, installed at launch.
 @MainActor
-final class OverlayController {
+final class OverlayController: ObservableObject {
     static let shared = OverlayController()
+
+    /// The panel's real visibility. The menu used to read `settings.overlayEnabled` instead,
+    /// so "Show/Hide overlay" could claim the opposite of what was on screen.
+    @Published private(set) var isVisible = false
 
     private var panel: NSPanel?
     private var cancellables: Set<AnyCancellable> = []
@@ -202,10 +227,12 @@ final class OverlayController {
         self.panel = panel
         panel.setFrameOrigin(savedOrigin(for: panel))
         panel.orderFrontRegardless()
+        isVisible = true
     }
 
     func hide() {
         panel?.orderOut(nil)
+        isVisible = false
     }
 
     func hideByUser() {

@@ -14,6 +14,10 @@ final class MeetingStore {
         guard rc == SQLITE_OK, let opened = tmp else { throw NSError(domain: "Radar", code: 2) }
         db = opened
         try exec("PRAGMA foreign_keys=ON;")
+        // The dashboard opens its own connection while capture is writing: WAL + a busy
+        // timeout keep reads from failing with "database is locked".
+        try exec("PRAGMA journal_mode=WAL;")
+        try exec("PRAGMA busy_timeout=3000;")
         try exec(schema)
         // v2 migration: persist lang_prob (older DBs lack the column).
         try? exec("ALTER TABLE segments ADD COLUMN lang_prob REAL DEFAULT 0.8;")
@@ -175,6 +179,70 @@ final class MeetingStore {
     }
 
     /// Hourly janitor: delete rows past expires_at + vacuum.
+    // MARK: - Dashboard reads
+
+    struct MeetingSummary: Identifiable, Sendable {
+        let id: UUID
+        let title: String
+        let startedAt: Date
+        let endedAt: Date?
+        let segments: Int
+        let preview: String
+
+        var duration: TimeInterval? { endedAt.map { $0.timeIntervalSince(startedAt) } }
+    }
+
+    /// Newest first — the Meetings pane and Overview "today" counts both use this.
+    func listMeetings(limit: Int = 200) throws -> [MeetingSummary] {
+        let sql = """
+            SELECT m.id, COALESCE(m.title,''), m.started_at, m.ended_at,
+                   (SELECT COUNT(*) FROM segments s WHERE s.meeting_id=m.id),
+                   COALESCE((SELECT text FROM segments s WHERE s.meeting_id=m.id ORDER BY t_start LIMIT 1),'')
+            FROM meetings m ORDER BY m.started_at DESC LIMIT ?;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let s = stmt else {
+            throw NSError(domain: "Radar", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
+        }
+        defer { sqlite3_finalize(s) }
+        sqlite3_bind_int64(s, 1, Int64(limit))
+        var out: [MeetingSummary] = []
+        while sqlite3_step(s) == SQLITE_ROW {
+            let id = String(cString: sqlite3_column_text(s, 0))
+            let started = sqlite3_column_int64(s, 2)
+            let ended: Int64? = sqlite3_column_type(s, 3) == SQLITE_NULL ? nil : sqlite3_column_int64(s, 3)
+            out.append(MeetingSummary(
+                id: UUID(uuidString: id) ?? UUID(),
+                title: String(cString: sqlite3_column_text(s, 1)),
+                startedAt: Date(timeIntervalSince1970: Double(started) / 1000),
+                endedAt: ended.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+                segments: Int(sqlite3_column_int64(s, 4)),
+                preview: String(cString: sqlite3_column_text(s, 5))))
+        }
+        return out
+    }
+
+    func renameMeeting(id: UUID, title: String) throws {
+        try run("UPDATE meetings SET title=? WHERE id=?;", [title, id.uuidString])
+    }
+
+    func deleteMeeting(id: UUID) throws {
+        try run("DELETE FROM segments WHERE meeting_id=?;", [id.uuidString])
+        try run("DELETE FROM meetings WHERE id=?;", [id.uuidString])
+    }
+
+    /// Bytes on disk (WAL included) — the Privacy pane shows real numbers, not a guess.
+    func storageBytes() -> Int64 {
+        let fm = FileManager.default
+        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return ["ReCatch.sqlite", "ReCatch.sqlite-wal", "ReCatch.sqlite-shm"].reduce(0) { sum, name in
+            let path = dir.appendingPathComponent(name).path
+            let size = (try? fm.attributesOfItem(atPath: path)[.size] as? Int64) ?? 0
+            return sum + (size ?? 0)
+        }
+    }
+
     func purgeExpired() throws {
         try exec("DELETE FROM meetings WHERE expires_at < strftime('%s','now')*1000; VACUUM;")
     }

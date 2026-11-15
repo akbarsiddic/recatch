@@ -23,6 +23,11 @@ final class AudioCaptureManager: ObservableObject {
     /// Model phase for menu/panel ("Model ready", "Downloading base — 42%", …).
     @Published var modelLine = "Model not loaded"
     @Published var heardLine = "Nothing heard yet"
+    /// Speech-model readiness, surfaced by the dashboard (phase + real progress).
+    @Published var modelPhase: TranscriptionPhase = .idle
+    @Published var modelProgress: Double = 0
+    /// Language detected once for this meeting ("Bahasa Indonesia"), nil while unknown.
+    @Published var detectedLanguageTitle: String?
 
     var onChunk: (@Sendable (AudioChunk) -> Void)?
     var onSegment: (@Sendable (TranscriptSegment) -> Void)?
@@ -37,6 +42,12 @@ final class AudioCaptureManager: ObservableObject {
     private var watchdog: Timer?
     private var drainTimer: Timer?
     private var janitor: Timer?
+
+    /// Language is decided once per meeting, then locked (see LanguageBox).
+    private let languageBox = LanguageBox(.auto)
+    /// Votes from the first paragraphs; see collectLanguageVote.
+    private var languageVotes: [String: Int] = [:]
+    private var didDetectLanguage = false
 
     private var store: MeetingStore?
     private let mixer = AudioMixer()
@@ -76,10 +87,12 @@ final class AudioCaptureManager: ObservableObject {
         do {
             let st = try MeetingStore(path: Self.defaultDBPath())
             try? st.purgeExpired()
-            let nowMs = clock.nowMs()
+            // Epoch ms: the Meetings pane shows a real date. Segment offsets stay relative
+            // to the meeting start, which is what the "last N seconds" window maths needs.
+            let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
             let expires = RetentionJanitor.expiresAt(from: Date(), days: retentionDays)
             try st.createMeeting(id: mid, title: "Meeting", outputLanguage: outputLanguage,
-                                 startedAt: nowMs, expiresAt: expires)
+                                 startedAt: startedAt, expiresAt: expires)
             janitor?.invalidate()
             janitor = RetentionJanitor.scheduleHourly(store: st)
             self.store = st
@@ -92,9 +105,17 @@ final class AudioCaptureManager: ObservableObject {
 
         // Rolling transcriber → partial captions + settled segments.
         rolling.config = .init()
-        rolling.transcribe = { [whisper, hint = languageHint] pcm in
-            let (text, _, _, _) = (try? await whisper.transcribe(pcm, hint: hint)) ?? ("", "", 0, 0)
-            return text
+        let box = languageBox
+        // Start in whatever we learned last time; only a first-ever meeting begins unknown.
+        let starting = AppSettings.shared.startingLanguage
+        await box.set(starting.hint)
+        languageVotes.removeAll()
+        didDetectLanguage = starting != .auto
+        detectedLanguageTitle = starting == .auto ? nil : starting.title
+        rolling.transcribe = { [whisper, box] pcm in
+            let hint = await box.get()
+            let (text, lang, _, _) = (try? await whisper.transcribe(pcm, hint: hint)) ?? ("", "", 0, 0)
+            return (text, lang)
         }
         rolling.onPartial = { [weak self] line in
             Task { @MainActor in
@@ -104,6 +125,9 @@ final class AudioCaptureManager: ObservableObject {
         }
         rolling.onFinal = { [weak self] line, stream in
             Task { @MainActor in self?.persist(line: line, stream: stream) }
+        }
+        rolling.onLanguage = { [weak self] lang in
+            Task { @MainActor in self?.collectLanguageVote(lang) }
         }
 
         await whisper.configure(quality)
@@ -174,6 +198,7 @@ final class AudioCaptureManager: ObservableObject {
         do {
             try tap.start()
             systemTap = tap
+            PermissionsManager.confirmAudioRecording()
             return
         } catch {
             Debug.log("tap failed: \(error.localizedDescription) — falling back to ScreenCaptureKit")
@@ -213,6 +238,55 @@ final class AudioCaptureManager: ObservableObject {
         if rolling.currentLine.isEmpty == false { chunkCount += 1 }
     }
 
+    /// Decide the meeting language from the first few paragraphs, then remember it.
+    ///
+    /// No extra inference: every rolling pass already reports the language it decoded, so the
+    /// vote is free. (A dedicated detection pass doubled GPU work and, with the turbo encoder,
+    /// was enough to crash MetalPerformanceShadersGraph.)
+    @MainActor
+    private func collectLanguageVote(_ lang: String) {
+        guard AppSettings.shared.spokenLanguage == .auto, !didDetectLanguage else { return }
+        guard !lang.isEmpty else { return }
+        languageVotes[lang, default: 0] += 1
+        guard segmentCount >= 3 else { return }
+        let winner = languageVotes.max { $0.value < $1.value }
+        guard let code = winner?.key, winner!.value >= 2 else { return }
+        didDetectLanguage = true
+        let language = SpokenLanguage.allCases.first { $0.code == code } ?? .auto
+        guard language != .auto else { return }
+        detectedLanguageTitle = language.title
+        AppSettings.shared.learnedLanguage = language
+        Task { await languageBox.set(language.hint) }
+        Debug.log("language learned from \(languageVotes): \(code) (\(language.title))")
+    }
+
+    /// One-click override from the dashboard or the overlay: applies now and is remembered.
+    @MainActor
+    func applyLanguage(_ language: SpokenLanguage) {
+        AppSettings.shared.spokenLanguage = language
+        if language != .auto { AppSettings.shared.learnedLanguage = language }
+        detectedLanguageTitle = language == .auto ? nil : language.title
+        didDetectLanguage = language != .auto
+        languageVotes.removeAll()
+        Task { await languageBox.set(language.hint) }
+        Debug.log("language set by hand: \(language.rawValue)")
+    }
+
+    /// Load the speech model without starting a meeting (onboarding, pre-warm).
+    @MainActor
+    func prepareModel() async {
+        await whisper.configure(quality)
+        await whisper.load()
+        await refreshModelState()
+    }
+
+    @MainActor
+    private func refreshModelState() async {
+        modelPhase = await whisper.phase
+        modelProgress = await whisper.progress
+        modelLine = await whisper.statusLine
+    }
+
     /// Settled utterance → SQLite + feed.
     @MainActor
     private func persist(line: String, stream: AudioStream) {
@@ -235,8 +309,14 @@ final class AudioCaptureManager: ObservableObject {
         level = max(0, level * 0.6)
         Task { [weak self] in
             guard let self else { return }
+            let phase = await self.whisper.phase
+            let progress = await self.whisper.progress
             let line = await self.whisper.statusLine
-            await MainActor.run { [weak self] in self?.modelLine = line }
+            await MainActor.run { [weak self] in
+                self?.modelPhase = phase
+                self?.modelProgress = progress
+                self?.modelLine = line
+            }
         }
         if segmentCount == 0 {
             heardLine = rolling.currentLine.isEmpty ? Self.idlePrompt : rolling.currentLine
@@ -255,6 +335,7 @@ final class AudioCaptureManager: ObservableObject {
         Task {
             await whisper.retry()
             await whisper.load()
+            await refreshModelState()
         }
     }
 

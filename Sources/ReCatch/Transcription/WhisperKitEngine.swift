@@ -75,7 +75,8 @@ actor WhisperKitEngine {
                 Task { await self?.setProgress(value) }
             }
             statusLine = "Loading model…"
-            let m = try await WhisperKit(model: modelName, modelFolder: folder.path, computeOptions: Self.computeOptions())
+            let m = try await WhisperKit(model: modelName, modelFolder: folder.path,
+                                     computeOptions: Self.computeOptions(for: modelName.contains("turbo") ? .accurate : .fast))
             model = m
             status = .ready
             phase = .ready
@@ -96,14 +97,32 @@ actor WhisperKitEngine {
         }
     }
 
-    /// ANE compilation of a big encoder is pathological on some Macs (upstream argmaxinc/argmax-oss-swift#560:
-    /// ANECompilerService at 100% CPU for tens of minutes, `runTranscribeTask` never returns).
-    /// GPU is predictable. Opt back in with RECATCH_ANE=1.
-    static func computeOptions() -> ModelComputeOptions {
-        if ProcessInfo.processInfo.environment["RECATCH_ANE"] == "1" {
+    /// Compute placement is a stability decision, learned the hard way on this Mac:
+    ///
+    /// - The **large-v3-turbo** encoder on GPU crashes inside MetalPerformanceShadersGraph
+    ///   (`GPU::StitchedOpHandler::encodeOp` → SIGSEGV). That is an unrecoverable app crash
+    ///   mid-meeting, so the big model runs on the Neural Engine instead.
+    /// - The **base** encoder is tiny and has run for hours on GPU without a single fault.
+    ///
+    /// ANE compilation of a big encoder is slow the first time (and pathological on some Macs,
+    /// upstream argmaxinc/argmax-oss-swift#560), but it is cached afterwards. `RECATCH_ANE=1`
+    /// forces ANE for every tier.
+    static func computeOptions(for quality: TranscriptionQuality = .fast) -> ModelComputeOptions {
+        let env = ProcessInfo.processInfo.environment
+        if env["RECATCH_ANE"] == "1" {
             return ModelComputeOptions(melCompute: .cpuAndGPU,
                                        audioEncoderCompute: .cpuAndNeuralEngine,
                                        textDecoderCompute: .cpuAndNeuralEngine,
+                                       prefillCompute: .cpuOnly)
+        }
+        // The 954 MB turbo encoder is broken on this class of machine both ways:
+        //   GPU → SIGSEGV inside MetalPerformanceShadersGraph while encoding
+        //   ANE → ANECompilerService pins a core for tens of minutes and never returns
+        // CPU is the only placement that survives. Slower, but it answers.
+        if quality == .accurate {
+            return ModelComputeOptions(melCompute: .cpuOnly,
+                                       audioEncoderCompute: .cpuOnly,
+                                       textDecoderCompute: .cpuOnly,
                                        prefillCompute: .cpuOnly)
         }
         return ModelComputeOptions(melCompute: .cpuAndGPU,

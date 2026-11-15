@@ -34,3 +34,12 @@ final class AsyncSemaphore: @unchecked Sendable {
         }
     }
 }
+
+/// The meeting language, decided once and read by every inference call.
+/// An actor because the transcriber closure is @Sendable and the value changes mid-meeting.
+actor LanguageBox {
+    private var hint: LanguageHint
+    init(_ hint: LanguageHint) { self.hint = hint }
+    func set(_ h: LanguageHint) { hint = h }
+    func get() -> LanguageHint { hint }
+}

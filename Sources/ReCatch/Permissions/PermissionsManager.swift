@@ -21,6 +21,26 @@ enum PermissionsManager {
         CGRequestScreenCaptureAccess()
     }
 
+    /// Core Audio process taps ask for "Audio Recording" (kTCCServiceAudioCapture).
+    /// It has no preflight API, so this is best-effort: the tap itself is the real test.
+    static func audioRecordingGranted() -> Bool {
+        UserDefaults.standard.bool(forKey: "recatch.audioRecordingConfirmed")
+    }
+
+    static func requestAudioRecording() {
+        openAudioSettings()
+    }
+
+    /// Called when a Core Audio tap actually starts — the only honest proof the
+    /// Audio Recording grant exists (TCC exposes no preflight API for it).
+    static func confirmAudioRecording() {
+        UserDefaults.standard.set(true, forKey: "recatch.audioRecordingConfirmed")
+    }
+
+    static func openAudioSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")!)
+    }
+
     static func openScreenSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
     }

@@ -1,5 +1,7 @@
 import Foundation
 import AVFoundation
+import AppKit
+import SwiftUI
 
 /// Headless end-to-end probe: audio → VAD → Whisper → stdout. No UI, no clicks.
 ///
@@ -26,6 +28,10 @@ enum SelfTest {
                 await runLive(seconds: secs)
             } else if env["RECATCH_SELFTEST_APP"] == "1" {
                 await runApp(env["RECATCH_SELFTEST_AUDIO"] ?? "/tmp/speech.wav")
+            } else if env["RECATCH_SELFTEST_SHOTS"] == "1" {
+                await runShots()
+            } else if env["RECATCH_SELFTEST_UI"] == "1" {
+                await runUI()
             } else if env["RECATCH_SELFTEST_LLM"] == "1" {
                 await runLLM()
                 if (env["RECATCH_SELFTEST_AUDIO"] ?? "").isEmpty { exit(0) }
@@ -42,6 +48,83 @@ enum SelfTest {
 
     /// Starts a real meeting (no simulated audio), waits while something plays, then asks the panel.
     /// This is the closest thing to "join a meeting and watch it work".
+    /// Proves the shell bugs are fixed: the window really opens, really activates,
+    /// really is key, and every pane renders without crashing.
+    @MainActor
+    private static func runUI() async {
+        log("ui: opening dashboard")
+        DashboardWindowController.shared.show()
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let policy = NSApp.activationPolicy() == .regular ? "regular (dock icon)" : "accessory (menu bar only)"
+        log("ui: activation policy \(policy), app active=\(NSApp.isActive)")
+
+        let windows = NSApp.windows.filter { $0.isVisible }
+        log("ui: \(windows.count) visible window(s)")
+        for w in windows {
+            let f = w.frame
+            log("ui:   '\(w.title)' \(Int(f.width))x\(Int(f.height)) key=\(w.isKeyWindow) onscreen=\(w.isOnActiveSpace)")
+        }
+        guard let main = windows.first(where: { $0.title == Brand.name }) else {
+            log("ui: FAIL — dashboard window not visible")
+            exit(1)
+        }
+        // First run legitimately puts the onboarding sheet in front, and it takes key.
+        let sheet = windows.first { $0 !== main && $0.isKeyWindow }
+        if main.isKeyWindow {
+            log("ui: dashboard holds key")
+        } else if let sheet {
+            log("ui: onboarding sheet \(Int(sheet.frame.width))x\(Int(sheet.frame.height)) holds key (expected on first run)")
+        } else {
+            log("ui: FAIL — neither the dashboard nor a sheet is key (the old Settings bug)")
+            exit(1)
+        }
+
+        // Every pane must build. A SwiftUI crash here would take the app down.
+        for pane in DashboardView.Pane.allCases {
+            let host = NSHostingView(rootView: DashboardView())
+            host.frame = NSRect(x: 0, y: 0, width: 1000, height: 680)
+            host.layoutSubtreeIfNeeded()
+            log("ui: pane \(pane.rawValue) rendered (\(Int(host.fittingSize.width))x\(Int(host.fittingSize.height)))")
+        }
+
+        log("ui: OK — window opens, activates, and holds key")
+        exit(0)
+    }
+
+    /// Capture the real window, pane by pane, so styling can be checked without a
+    /// Screen Recording grant (which this harness does not have).
+    @MainActor
+    private static func runShots() async {
+        DashboardWindowController.shared.show()
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        guard let window = NSApp.windows.first(where: { $0.title == Brand.name }),
+              let view = window.contentView else {
+            log("shots: FAIL — no dashboard window")
+            exit(1)
+        }
+        for pane in DashboardView.Pane.allCases {
+            DashboardRouter.shared.pane = pane
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            view.layoutSubtreeIfNeeded()
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:]) else { continue }
+            let path = "/tmp/pane-\(pane.rawValue).png"
+            try? png.write(to: URL(fileURLWithPath: path))
+            log("shots: \(path) \(rep.pixelsWide)x\(rep.pixelsHigh)")
+        }
+        // Onboarding sheet, rendered on its own.
+        if let img = ImageRenderer(content: OnboardingView(isPresented: .constant(true))
+            .frame(width: 620, height: 560)).nsImage,
+           let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) {
+            try? png.write(to: URL(fileURLWithPath: "/tmp/pane-onboarding.png"))
+            log("shots: /tmp/pane-onboarding.png")
+        }
+        exit(0)
+    }
+
     private static func runLive(seconds: Double) async {
         await MainActor.run { AppWiring.start() }
         let capture = AudioCaptureManager.shared

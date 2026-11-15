@@ -95,6 +95,8 @@ final class AppSettings: ObservableObject {
         static let autoListen = "recatch.autoListen"
         static let transcriptionQuality = "recatch.transcriptionQuality"
         static let spokenLanguage = "recatch.spokenLanguage"
+        static let onboarded = "recatch.onboarded"
+        static let learnedLanguage = "recatch.learnedLanguage"
     }
 
     init() {}
@@ -175,6 +177,30 @@ final class AppSettings: ObservableObject {
     var spokenLanguage: SpokenLanguage {
         get { SpokenLanguage(rawValue: d.string(forKey: K.spokenLanguage) ?? "") ?? .auto }
         set { d.set(newValue.rawValue, forKey: K.spokenLanguage); objectWillChange.send() }
+    }
+
+    /// What the meeting actually sounded like, learned from the first few paragraphs and
+    /// reused for the next meeting. Only consulted while `spokenLanguage == .auto`.
+    var learnedLanguage: SpokenLanguage? {
+        get {
+            guard let raw = d.string(forKey: K.learnedLanguage), raw != SpokenLanguage.auto.rawValue else { return nil }
+            return SpokenLanguage(rawValue: raw)
+        }
+        set {
+            d.set(newValue?.rawValue ?? SpokenLanguage.auto.rawValue, forKey: K.learnedLanguage)
+            objectWillChange.send()
+        }
+    }
+
+    /// The language a new meeting starts in: an explicit choice wins, otherwise what we learned.
+    var startingLanguage: SpokenLanguage {
+        spokenLanguage == .auto ? (learnedLanguage ?? .auto) : spokenLanguage
+    }
+
+    /// First-run wizard completed (or skipped). The dashboard shows it as a sheet until true.
+    var onboarded: Bool {
+        get { d.bool(forKey: K.onboarded) }
+        set { d.set(newValue, forKey: K.onboarded); objectWillChange.send() }
     }
 
     // MARK: - Misc

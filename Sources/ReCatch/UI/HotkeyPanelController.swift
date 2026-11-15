@@ -6,9 +6,11 @@ extension KeyboardShortcuts.Name {
     static let summonPanel = Self("summonPanel", default: .init(.r, modifiers: [.option, .command]))
 }
 
-/// Nonactivating floating panel for ⌥⌘R. Esc dismisses (via onExitCommand in the view).
+/// ⌥⌘R brings the dashboard forward on the Ask pane.
+///
+/// There used to be a second floating panel here. Two surfaces is one too many: the overlay
+/// shows live captions and catch-up, the dashboard is where you ask anything deeper.
 enum HotkeyPanelController {
-    private static var panel: NSPanel?
     private static var registered = false
 
     /// Idempotent: KeyboardShortcuts would otherwise stack handlers on every call.
@@ -22,25 +24,11 @@ enum HotkeyPanelController {
 
     @MainActor
     static func summon() {
-        if panel == nil {
-            let p = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
-                styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
-                backing: .buffered, defer: false)
-            p.isFloatingPanel = true
-            p.hidesOnDeactivate = false
-            p.title = "ReCatch"
-            p.contentView = NSHostingView(rootView: HotkeyPanelView(model: PanelSession.shared))
-            p.center()
-            panel = p
-        }
-        panel?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        PanelSession.shared.run()
+        DashboardRouter.shared.open(.ask)
     }
+
     @MainActor
     static func dismiss() {
-        PanelSession.shared.cancel()
-        panel?.orderOut(nil)
+        DashboardWindowController.shared.close()
     }
 }

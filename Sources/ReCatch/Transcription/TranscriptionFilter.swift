@@ -3,7 +3,7 @@ import Foundation
 /// Transcription engine phase. Lives here (not WhisperKitEngine) so UI code
 /// can switch on it without importing WhisperKit.
 enum TranscriptionPhase: String, Sendable {
-    case idle, downloading, ready, failed
+    case idle, downloading, loading, ready, failed
 }
 
 /// Pure transcription post-filter: no model, no dependencies — unit-testable.
@@ -29,6 +29,26 @@ enum TranscriptionFilter {
         return meaningful ? t.trimmingCharacters(in: .whitespacesAndNewlines) : ""
     }
 
+    /// Whisper's decoder can loop on a pause ("yang yang yang yang…"). Drop runs of the
+    /// same token so a single stall doesn't wreck the line — and the segment after it.
+    static func collapseRepeats(_ text: String) -> String {
+        var out: [String] = []
+        var runToken = ""
+        var runCount = 0
+        for raw in text.split(separator: " ") {
+            let token = raw.lowercased().trimmingCharacters(in: .punctuationCharacters)
+            if token == runToken, !token.isEmpty {
+                runCount += 1
+                if runCount > 1 { continue }   // one token survives; the loop is dropped
+            } else {
+                runToken = token
+                runCount = 1
+            }
+            out.append(String(raw))
+        }
+        return out.joined(separator: " ")
+    }
+
     /// Returns (text, langProb, confidence). Empty text = drop the chunk.
     static func filter(_ segs: [Segment]) -> (String, Double, Double) {
         let kept = segs.filter { seg in
@@ -43,8 +63,11 @@ enum TranscriptionFilter {
             return true
         }
         guard !kept.isEmpty else { return ("", 0, 0) }
-        let text = stripAnnotations(kept.map(\.text).joined(separator: " "))
+        let text = collapseRepeats(stripAnnotations(kept.map(\.text).joined(separator: " ")))
         guard !text.isEmpty else { return ("", 0, 0) }
+        // A line that is one word looping is a decoder stall, not speech.
+        let words = text.lowercased().split(separator: " ")
+        if words.count >= 8, Set(words).count <= 2 { return ("", 0, 0) }
         let avgLog = kept.map(\.avgLogprob).reduce(0, +) / Float(kept.count)
         let confidence = Double(max(0, min(1, exp(min(0, avgLog)))))
         let speechiness = kept.map { 1 - $0.noSpeechProb }.reduce(0, +) / Float(kept.count)
