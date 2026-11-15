@@ -7,6 +7,9 @@ final class VADChunker: @unchecked Sendable {
     private var voiced: [Int16] = []
     private var silenceMs = 0
     private var chunkStartMs: Int64 = 0
+    /// Slow-moving room tone. A fixed threshold either misses soft speech or fires on noise;
+    /// this adapts per machine, per room, per mic.
+    private var noiseFloor: Double = 0
     var onChunk: (@Sendable (AudioChunk) -> Void)?
 
     init(config: VADConfig = VADConfig()) { self.config = config }
@@ -16,8 +19,20 @@ final class VADChunker: @unchecked Sendable {
     func feed(pcm: [Int16], stream: AudioStream, meetingMs: Int64) {
         lock.lock(); defer { lock.unlock() }
         let frameMs = pcm.isEmpty ? 0 : pcm.count / 16
-        let energy = pcm.isEmpty ? 0 : pcm.reduce(0) { $0 + Int64($1) * Int64($1) } / Int64(pcm.count)
-        let isVoiced = energy > 800_000 // ~sensitive enough for laptop mics; Silero replaces this
+        let energy: Double = pcm.isEmpty ? 0 : pcm.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(pcm.count)
+        // Gate = 3x room tone, clamped: never below ~0.009 RMS (dead quiet room),
+        // never above ~0.037 RMS (loud room would otherwise go deaf). Silero replaces this later.
+        let floor = min(max(noiseFloor, 26_666), 400_000)
+        let isVoiced = energy > max(80_000.0, floor * 3)
+        // Track room tone in both states, faster when quiet — otherwise a noisy room
+        // that starts above the initial gate stays "voiced" forever and the floor never learns.
+        if noiseFloor == 0 {
+            noiseFloor = energy
+        } else if isVoiced {
+            noiseFloor = noiseFloor * 0.995 + energy * 0.005
+        } else {
+            noiseFloor = noiseFloor * 0.9 + energy * 0.1
+        }
         if voiced.isEmpty { chunkStartMs = meetingMs }
         if isVoiced {
             voiced.append(contentsOf: pcm)

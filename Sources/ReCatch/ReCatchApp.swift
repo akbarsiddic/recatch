@@ -1,32 +1,40 @@
 import SwiftUI
 import AppKit
 
+/// Launch-time work. Menu-bar apps must be live before any menu is opened:
+/// the old wiring lived in MenuBarExtra's `.onAppear`, which is why a cold start had no hotkey.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        AppWiring.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        OverlayController.shared.rememberPosition()
+    }
+}
+
 @main
 struct ReCatchApp: App {
-    @StateObject private var capture = AudioCaptureManager()
-    @StateObject private var settings = AppSettings()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @StateObject private var capture = AudioCaptureManager.shared
+    @StateObject private var settings = AppSettings.shared
     @State private var showConsent = false
     @State private var consentOK = false
-    @State private var debugLines: [(id: UUID, who: String, text: String)] = []
-    @State private var wired = false
     @Environment(\.openWindow) private var openWindow
+
+    init() { SelfTest.runIfRequested() }
 
     var body: some Scene {
         MenuBarExtra("ReCatch", systemImage: icon) {
             menuContent
-                .onAppear {
-                    guard !wired else { return }
-                    wired = true
-                    wirePanel()
-                    HotkeyPanelController.registerHotkey()
-                }
         }
         Settings {
             SettingsView(settings: settings, capture: capture)
         }
-        Window("Debug transcripts", id: "debug") {
+        Window("Live transcript", id: "debug") {
             DebugTranscriptView(
-                lines: debugLines,
+                lines: TranscriptFeed.shared.lines.map { (id: $0.id, who: $0.who, text: $0.text) },
                 status: "\(capture.chunkCount) chunks · \(capture.segmentCount) segments · \(capture.modelLine)"
             )
         }
@@ -41,18 +49,27 @@ struct ReCatchApp: App {
             statusSection
             Divider()
             Button(capture.state == .listening ? "Stop listening" : "Start listening") {
-                if capture.state == .listening { Task { await capture.stopMeeting() } }
-                else if consentOK { Task { await capture.startMeeting() } }
-                else { showConsent = true }
+                if capture.state == .listening {
+                    MeetingWatcher.shared.noteManualStop()
+                    Task { await capture.stopMeeting() }
+                } else if consentOK {
+                    Task { await capture.startMeeting() }
+                } else {
+                    showConsent = true
+                }
             }
             .keyboardShortcut("l", modifiers: [.option, .command])
             Button("Ask ReCatch… (⌥⌘R)") {
                 Task { @MainActor in HotkeyPanelController.summon() }
-            }.disabled(capture.state != .listening)
+            }
+            Button(settings.overlayEnabled ? "Hide overlay" : "Show overlay") {
+                OverlayController.shared.toggle()
+            }
             Button("Live transcript…") { openWindow(id: "debug") }
             Divider()
             Button("Delete everything now") {
                 try? FileManager.default.removeItem(at: dbURL())
+                TranscriptFeed.shared.reset()
                 if capture.state == .listening { Task { await capture.stopMeeting() } }
             }
             Divider()
@@ -68,13 +85,17 @@ struct ReCatchApp: App {
                 Text(Brand.name).bold()
             }
             Text("You're responsible for complying with local rules and letting participants know you're transcribing.")
-            Text("Audio stays on this Mac. Only transcript text is sent to your chosen LLM for the window you request.")
+            Text("Audio stays on this Mac. Only transcript text is sent to your chosen provider for the window you request.")
                 .foregroundColor(.secondary)
             HStack {
                 Button("Cancel") { showConsent = false }
-                Button("Start listening") { consentOK = true; showConsent = false; Task { await capture.startMeeting() } }
+                Button("Start listening") {
+                    consentOK = true
+                    showConsent = false
+                    Task { await capture.startMeeting() }
+                }
             }
-        }.padding(4).frame(width: 300)
+        }.padding(4).frame(width: 320)
     }
 
     @ViewBuilder
@@ -91,45 +112,30 @@ struct ReCatchApp: App {
                     Text(capture.heardLine).font(.caption).foregroundColor(.secondary)
                 }
                 Text(capture.modelLine).font(.caption).foregroundColor(.secondary)
+                if let note = capture.systemNote {
+                    Text(note).font(.caption2).foregroundColor(.secondary).frame(width: 300, alignment: .leading)
+                }
             } else if case .error(let m) = capture.state {
-                Text(m).font(.caption).foregroundColor(Brand.bad).frame(width: 300)
+                Text(m).font(.caption).foregroundColor(Brand.bad).frame(width: 320, alignment: .leading)
             } else {
-                Text("Join a Meet, then Start listening.").font(.caption).foregroundColor(.secondary)
+                Text("Join a meeting — ReCatch starts listening by itself.")
+                    .font(.caption).foregroundColor(.secondary).frame(width: 300, alignment: .leading)
             }
+            Text(providerLine).font(.caption2).foregroundColor(.secondary)
         }.padding(.vertical, 2)
+    }
+
+    /// Which brain will answer — visible without opening Settings.
+    private var providerLine: String {
+        guard let p = settings.effectiveProvider(for: .rightNow) else {
+            return settings.missingKeyHint ?? "No provider ready"
+        }
+        return "Answering with \(ProviderCatalog.displayName(p)) · \(settings.model(for: .rightNow))"
     }
 
     private var statusTitle: String { AppStateDisplay.meta(for: capture.state).title }
     private var statusColor: Color { AppStateDisplay.meta(for: capture.state).color }
     private var icon: String { AppStateDisplay.meta(for: capture.state).icon }
-
-    /// Wire the shared panel to the live meeting exactly once per appearance.
-    private func wirePanel() {
-        Task { @MainActor in
-            PanelSession.shared.transcriptProvider = { [capture] secs in
-                capture.transcriptWindow(secondsBack: secs)
-            }
-            PanelSession.shared.meetingActive = { [capture] in capture.state == .listening }
-            PanelSession.shared.enginePhase = { [capture] in await capture.enginePhase() }
-            PanelSession.shared.gatewayFor = { [settings] scope in
-                settings.gatewayFor(scope)
-            }
-            PanelSession.shared.optionsFor = { [settings] scope, verbose in
-                settings.options(for: scope, verbose: verbose)
-            }
-            PanelSession.shared.logHandler = { [capture] provider, model, tin, tout, win in
-                capture.logLLM(provider: provider, model: model, tokensIn: tin, tokensOut: tout, windowSec: win)
-            }
-            capture.onSegment = { [weak capture] seg in
-                guard capture != nil else { return }
-                Task { @MainActor in
-                    let who = seg.stream == .mic ? "Me" : "Others"
-                    debugLines.append((seg.id, who, seg.text))
-                    if debugLines.count > 200 { debugLines.removeFirst(debugLines.count - 200) }
-                }
-            }
-        }
-    }
 
     private func dbURL() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -138,7 +144,6 @@ struct ReCatchApp: App {
 }
 
 /// Single switch mapping AppState → menu display (title, color, icon).
-/// Collapses the old title/color/icon switch trio (was: Repeated Switches).
 enum AppStateDisplay {
     static func meta(for state: AppState) -> (title: String, color: Color, icon: String) {
         switch state {

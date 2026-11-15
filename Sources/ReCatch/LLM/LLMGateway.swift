@@ -1,7 +1,5 @@
 import Foundation
 
-enum LLMFormat { case text, json }
-
 struct LLMOptions {
     var model: String
     var maxTokens: Int
@@ -15,7 +13,4 @@ protocol LLMGateway {
     func stream(prompt: String, options: LLMOptions) -> AsyncThrowingStream<String, Error>
 }
 
-enum LLMProvider: String, CaseIterable {
-    case anthropic, openAI, openCodeZen, openRouter, ollama
-    case opencodeCLI, claudeCLI, codexCLI
-}
+// Provider enum + catalog live in Providers.swift.

@@ -12,6 +12,19 @@ enum Brand {
     static let bad = Color.red
     static let ok = Color.green
     static let radius: CGFloat = 12
+
+    // MARK: - Surfaces
+    // Warm off-white, StreamLingo-ish: a page that isn't pure white and cards that aren't gray.
+    static let surface = Color(nsColor: .controlBackgroundColor)
+    static let raised = Color(nsColor: .textBackgroundColor)
+    static let line = Color.primary.opacity(0.08)
+    static let ink = Color.primary
+    static let muted = Color.secondary
+
+    /// Card radius used by panels and settings rows.
+    static let cardRadius: CGFloat = 16
+    /// Large radius for the floating overlay.
+    static let overlayRadius: CGFloat = 20
 }
 
 /// Branded panel/window header: mark + name + live status pill.

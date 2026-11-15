@@ -1,46 +1,55 @@
 import Foundation
 import Combine
 
-/// Owns both streams + VAD → Whisper → pipeline → SQLite.
-/// Single start/stop, watchdog for silence.
+/// Owns capture → mix → rolling ASR → SQLite.
 ///
-/// Threading: MeetingStore (sqlite) is touched on MainActor only.
+/// Shape borrowed from StreamLingo: one mixed stream, one recognizer, rolling captions.
+/// The old design ran two VADs and two Whisper calls (mic + system) concurrently — which
+/// deadlocked CoreML and meant nothing was ever transcribed.
 final class AudioCaptureManager: ObservableObject {
+    /// Menu-bar apps have exactly one capture owner; the app delegate wires it at launch.
+    static let shared = AudioCaptureManager()
+
     @Published var state: AppState = .idle
-    /// Live mic level 0...1 (decays on the watchdog tick). If this never moves, the mic is the problem.
+    /// Live mic level 0...1 (decays on the watchdog tick).
     @Published var level: Double = 0
-    /// Chunks the VAD emitted this meeting (capture is flowing).
+    /// Non-fatal note (e.g. "system audio off") — listening continues without it.
+    @Published var systemNote: String?
+    /// Rolling windows transcribed this meeting.
     @Published var chunkCount = 0
-    /// Transcribed segments persisted this meeting.
+    /// Settled utterances persisted this meeting.
     @Published var segmentCount = 0
-    /// When the last segment landed.
     @Published var lastHeardAt: Date?
-    /// Whisper phase for the menu/panel ("Model ready", "Downloading model…", …).
+    /// Model phase for menu/panel ("Model ready", "Downloading base — 42%", …).
     @Published var modelLine = "Model not loaded"
-    /// “12 segments · last heard 4s ago” — refreshed on the watchdog tick.
     @Published var heardLine = "Nothing heard yet"
-    /// Raw chunks (debug UI). Persisted segments arrive via onSegment.
+
     var onChunk: (@Sendable (AudioChunk) -> Void)?
     var onSegment: (@Sendable (TranscriptSegment) -> Void)?
+    /// Live partial caption (the overlay's headline).
+    var onPartial: (@MainActor (String) -> Void)?
 
     private(set) var meetingId: UUID?
     private let clock = MeetingClock()
     private var mic: MicCapture?
-    private var system: AnyObject?
+    private var systemTap: AnyObject?
+    private var systemSCK: AnyObject?
     private var watchdog: Timer?
+    private var drainTimer: Timer?
     private var janitor: Timer?
 
-    // Pipeline pieces (created per meeting).
     private var store: MeetingStore?
-    private var pipeline: TranscriptionPipeline?
-    private var vadMic = VADChunker()
-    private var vadSystem = VADChunker()
+    private let mixer = AudioMixer()
+    private let rolling = RollingTranscriber()
     private let whisper = WhisperKitEngine()
-    var languageHint: LanguageHint = .mixed
+    var languageHint: LanguageHint = .auto
     var retentionDays = 3
     var outputLanguage = "en"
+    /// Quality tier for the speech model; set from settings before start.
+    var quality: TranscriptionQuality = .fast
+    /// Self-test only: skip live mic/tap so a fed file is the sole audio source.
+    var suppressLiveSources = false
 
-    /// Shared initial prompt line (reset + watchdog agree).
     private static let idlePrompt = "Listening — talk to test the mic…"
 
     static func defaultDBPath() -> String {
@@ -51,18 +60,16 @@ final class AudioCaptureManager: ObservableObject {
 
     @MainActor
     func startMeeting() async {
+        guard state != .listening else { return }
         state = .requestingPermissions
-        // Preflight: mic prompt inline; Screen Recording needs grant + relaunch.
+
+        // Mic is the only hard requirement. System audio is a best-effort upgrade —
+        // blocking on it is what made this app look dead.
         if !PermissionsManager.micGranted() {
             guard await PermissionsManager.requestMic() else {
-                state = .error("Mic denied — allow in System Settings → Privacy → Microphone.")
+                state = .error("Mic denied — allow ReCatch in System Settings → Privacy → Microphone.")
                 return
             }
-        }
-        if !PermissionsManager.screenGranted() {
-            _ = PermissionsManager.requestScreen()
-            state = .error("Grant Screen Recording, then relaunch ReCatch. Mic-only until then is not started.")
-            return
         }
         clock.start()
         let mid = UUID()
@@ -81,56 +88,148 @@ final class AudioCaptureManager: ObservableObject {
             clock.stop()
             return
         }
-        let pipe = TranscriptionPipeline(meetingId: mid, hint: languageHint)
-        await pipe.setOnSegment { [weak self] seg in
-            Task { @MainActor [weak self] in
-                guard let self, let st = self.store else { return }
-                try? st.insertSegment(seg)
-                self.segmentCount += 1
-                self.lastHeardAt = Date()
-                self.onSegment?(seg)
+        meetingId = mid
+
+        // Rolling transcriber → partial captions + settled segments.
+        rolling.config = .init()
+        rolling.transcribe = { [whisper, hint = languageHint] pcm in
+            let (text, _, _, _) = (try? await whisper.transcribe(pcm, hint: hint)) ?? ("", "", 0, 0)
+            return text
+        }
+        rolling.onPartial = { [weak self] line in
+            Task { @MainActor in
+                self?.onPartial?(line)
+                self?.heardLine = line.isEmpty ? "Listening…" : "Hearing you now"
             }
         }
-        self.pipeline = pipe
-        self.meetingId = mid
-        vadMic = VADChunker()
-        vadSystem = VADChunker()
-        vadMic.onChunk = { [weak self] c in self?.handleVADChunk(c) }
-        vadSystem.onChunk = { [weak self] c in self?.handleVADChunk(c) }
+        rolling.onFinal = { [weak self] line, stream in
+            Task { @MainActor in self?.persist(line: line, stream: stream) }
+        }
+
+        await whisper.configure(quality)
+
+        if suppressLiveSources {
+            state = .listening
+            modelLine = "Preparing \(quality.title.lowercased()) model…"
+            Task { await whisper.load() }
+            startTimers()
+            return
+        }
 
         let micCap = MicCapture(clock: clock)
         micCap.onChunk = { [weak self] c in
-            self?.vadMic.feed(pcm: c.pcm16kMono, stream: .mic, meetingMs: c.meetingMs)
-            Task { @MainActor in
-                self?.level = PCM.rms(c.pcm16kMono)
-                self?.onChunk?(c)
-            }
+            guard let self else { return }
+            self.mixer.feed(c.pcm16kMono, stream: .mic)
+            Task { @MainActor in self.level = PCM.rms(c.pcm16kMono) }
         }
         do { try micCap.start() } catch { state = .error("Mic failed: \(error.localizedDescription)"); return }
         self.mic = micCap
-        if #available(macOS 14.0, *) {
-            let sys = SystemAudioCapture(clock: clock)
-            sys.onChunk = { [weak self] c in
-                self?.vadSystem.feed(pcm: c.pcm16kMono, stream: .system, meetingMs: c.meetingMs)
-                Task { @MainActor in self?.onChunk?(c) }
-            }
-            sys.onError = { [weak self] e in Task { @MainActor in self?.state = .error("System audio: \(e.localizedDescription)") } }
-            do { try await sys.start(displayID: nil) } catch { state = .error("System audio: \(error.localizedDescription)"); return }
-            self.system = sys
-        }
+
+        systemNote = nil
+        startSystemAudio()
+
         state = .listening
         level = 0; chunkCount = 0; segmentCount = 0; lastHeardAt = nil
         heardLine = Self.idlePrompt
-        // Preload the model now: waiting for the first VAD chunk would leave
-        // "Model not loaded" on screen for a quiet mic indefinitely.
-        modelLine = "Loading model…"
+        modelLine = "Preparing \(quality.title.lowercased()) model…"
         Task { await whisper.load() }
-        watchdog = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+
+        startTimers()
+    }
+
+    /// Drain (200 ms) keeps captions flowing; the transcriber decides when to run ASR.
+    @MainActor
+    private func startTimers() {
+        drainTimer?.invalidate()
+        let dt = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.drainTick() }
+        }
+        RunLoop.main.add(dt, forMode: .common)
+        drainTimer = dt
+
+        watchdog?.invalidate()
+        let wd = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
+        }
+        RunLoop.main.add(wd, forMode: .common)
+        watchdog = wd
+    }
+
+    /// Core Audio tap first (Audio Recording only), ScreenCaptureKit as fallback (Screen Recording).
+    @MainActor
+    private func startSystemAudio() {
+        guard #available(macOS 14.2, *) else {
+            systemNote = "System audio needs macOS 14.2+ — mic only."
+            return
+        }
+        let tap = SystemAudioTap(clock: clock)
+        tap.onChunk = { [weak self] c in
+            guard let self else { return }
+            self.mixer.feed(c.pcm16kMono, stream: .system)
+            Task { @MainActor in self.onChunk?(c) }
+        }
+        tap.onError = { [weak self] e in
+            Task { @MainActor in self?.systemNote = "System audio stopped: \(e.localizedDescription)" }
+        }
+        do {
+            try tap.start()
+            systemTap = tap
+            return
+        } catch {
+            Debug.log("tap failed: \(error.localizedDescription) — falling back to ScreenCaptureKit")
+            systemNote = "System audio off. \(error.localizedDescription)"
+        }
+
+        if #available(macOS 14.0, *), PermissionsManager.screenGranted() {
+            let sck = SystemAudioCapture(clock: clock)
+            sck.onChunk = { [weak self] c in
+                guard let self else { return }
+                self.mixer.feed(c.pcm16kMono, stream: .system)
+                Task { @MainActor in self.onChunk?(c) }
+            }
+            sck.onError = { [weak self] e in
+                Task { @MainActor in self?.systemNote = "System audio stopped: \(e.localizedDescription)" }
+            }
+            Task { @MainActor in
+                do {
+                    try await sck.start(displayID: nil)
+                    self.systemSCK = sck
+                    self.systemNote = nil
+                } catch {
+                    self.systemNote = "System audio unavailable — mic only."
+                }
+            }
+        } else if #available(macOS 14.0, *) {
+            _ = PermissionsManager.requestScreen()
         }
     }
 
-    /// 1s tick: decay the meter, refresh model phase + heard line (drives menu/panel).
+    @MainActor
+    private func drainTick() async {
+        guard state == .listening else { return }
+        guard let mixed = mixer.drain(maxSamples: 16_000 / 5) else { return }
+        rolling.feed(mixed.pcm, label: mixed.label)
+        await rolling.tick()
+        if rolling.currentLine.isEmpty == false { chunkCount += 1 }
+    }
+
+    /// Settled utterance → SQLite + feed.
+    @MainActor
+    private func persist(line: String, stream: AudioStream) {
+        guard let mid = meetingId, let st = store else { return }
+        let seg = TranscriptSegment(
+            id: UUID(), meetingId: mid,
+            tStartMs: clock.nowMs(), tEndMs: clock.nowMs(),
+            stream: stream, lang: "auto", langProb: 1.0,
+            text: line, confidence: 1.0)
+        do { try st.insertSegment(seg) }
+        catch { Debug.log("store insert failed: \(error.localizedDescription)") }
+        segmentCount += 1
+        lastHeardAt = Date()
+        onSegment?(seg)
+    }
+
+    /// 1s tick: decay the meter, refresh model phase (drives menu/panel).
     @MainActor
     private func tick() {
         level = max(0, level * 0.6)
@@ -140,7 +239,7 @@ final class AudioCaptureManager: ObservableObject {
             await MainActor.run { [weak self] in self?.modelLine = line }
         }
         if segmentCount == 0 {
-            heardLine = chunkCount == 0 ? Self.idlePrompt : "Hearing sound, waiting on first transcript…"
+            heardLine = rolling.currentLine.isEmpty ? Self.idlePrompt : rolling.currentLine
         } else if let last = lastHeardAt {
             let ago = max(0, Int(Date().timeIntervalSince(last)))
             heardLine = ago < 3 ? "\(segmentCount) segments · hearing you now" : "\(segmentCount) segments · last heard \(ago)s ago"
@@ -150,32 +249,21 @@ final class AudioCaptureManager: ObservableObject {
     /// Engine phase for the panel (no string-sniffing). Actor hop.
     func enginePhase() async -> TranscriptionPhase { await whisper.phase }
 
-    /// VAD chunk → Whisper → pipeline (drops empty transcripts, never persists hallucinations).
-    private func handleVADChunk(_ chunk: AudioChunk) {
-        Task { @MainActor in self.chunkCount += 1 }
-        let hint = languageHint
+    /// Retry a failed/damaged model download.
+    @MainActor
+    func retryModel() {
         Task {
-            do {
-                let (text, lang, _, conf) = try await whisper.transcribe(chunk.pcm16kMono, hint: hint)
-                let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !t.isEmpty else { return }
-                await pipeline?.ingest(chunk, text: t, lang: lang, confidence: conf)
-            } catch {
-                await MainActor.run { [weak self] in
-                    if let e = self?.state, e == .listening { /* keep listening; ASR retry next chunk */ }
-                }
-            }
+            await whisper.retry()
+            await whisper.load()
         }
     }
 
-    /// Transcript window from SQLite — feeds Right now / Missed / Ask prompts.
     @MainActor
     func transcriptText(sinceMs: Int64 = 0) -> String {
         guard let mid = meetingId, let st = store else { return "" }
         return (try? st.transcriptText(meetingId: mid, sinceMs: sinceMs)) ?? ""
     }
 
-    /// Windowed variant: secondsBack == 0 means the whole meeting.
     @MainActor
     func transcriptWindow(secondsBack: Int) -> String {
         guard meetingId != nil else { return "" }
@@ -184,7 +272,6 @@ final class AudioCaptureManager: ObservableObject {
         return transcriptText(sinceMs: since)
     }
 
-    /// Persist timestamp + size to llm_log (never content).
     @MainActor
     func logLLM(provider: String, model: String, tokensIn: Int, tokensOut: Int, windowSec: Int) {
         try? store?.logLLM(provider: provider, model: model, tokensIn: tokensIn, tokensOut: tokensOut, windowSec: windowSec)
@@ -195,19 +282,45 @@ final class AudioCaptureManager: ObservableObject {
         (try? store?.fetchLLMLog(limit: limit)) ?? []
     }
 
+    /// Test hook: push PCM through the same mix → rolling → store path the microphone uses.
+    @MainActor
+    func simulateSpeech(_ pcm: [Int16]) async {
+        // Let the model finish loading first, like a real meeting would.
+        var waited = 0
+        while await whisper.phase != .ready && waited < 200 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            waited += 1
+        }
+        mixer.feed(pcm, stream: .mic)
+        // Drain at real time (100 ms of audio per 100 ms) so passes behave like live capture.
+        var iterations = 0
+        while iterations < 2000 {
+            guard let mixed = mixer.drain(maxSamples: 1600) else { break }
+            rolling.feed(mixed.pcm, label: mixed.label)
+            await rolling.tick()
+            iterations += 1
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        await rolling.flush()
+        try? await Task.sleep(nanoseconds: 600_000_000)
+    }
+
     @MainActor
     func stopMeeting() async {
-        vadMic.flush(stream: .mic, meetingMs: clock.nowMs())
-        vadSystem.flush(stream: .system, meetingMs: clock.nowMs())
+        drainTimer?.invalidate(); drainTimer = nil
         watchdog?.invalidate(); watchdog = nil
         janitor?.invalidate(); janitor = nil
+        await rolling.flush()
         mic?.stop(); mic = nil
-        if #available(macOS 14.0, *), let sys = system as? SystemAudioCapture { await sys.stop() }
-        system = nil
+        if #available(macOS 14.2, *), let tap = systemTap as? SystemAudioTap { tap.stop() }
+        if #available(macOS 14.0, *), let sck = systemSCK as? SystemAudioCapture {
+            Task { await sck.stop() }
+        }
+        systemTap = nil; systemSCK = nil
+        mixer.reset()
         if let mid = meetingId, let st = store { try? st.endMeeting(id: mid) }
         meetingId = nil
         store = nil
-        pipeline = nil
         clock.stop()
         state = .idle
     }

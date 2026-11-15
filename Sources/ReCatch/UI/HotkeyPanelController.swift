@@ -9,8 +9,12 @@ extension KeyboardShortcuts.Name {
 /// Nonactivating floating panel for ⌥⌘R. Esc dismisses (via onExitCommand in the view).
 enum HotkeyPanelController {
     private static var panel: NSPanel?
+    private static var registered = false
 
+    /// Idempotent: KeyboardShortcuts would otherwise stack handlers on every call.
     static func registerHotkey() {
+        guard !registered else { return }
+        registered = true
         KeyboardShortcuts.onKeyUp(for: .summonPanel) {
             Task { @MainActor in summon() }
         }
@@ -34,7 +38,6 @@ enum HotkeyPanelController {
         NSApp.activate(ignoringOtherApps: true)
         PanelSession.shared.run()
     }
-
     @MainActor
     static func dismiss() {
         PanelSession.shared.cancel()
