@@ -131,6 +131,11 @@ private struct OverlayAskHeight: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
+private struct OverlayScrollOffset: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 private struct OverlayContentHeight: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -140,12 +145,27 @@ struct OverlayView: View {
     @ObservedObject var model: OverlayModel
     @ObservedObject var capture: AudioCaptureManager
     var onHide: () -> Void
+    /// Test harness only: the thumb is otherwise shown on scroll or hover, which a screenshot
+    /// cannot trigger.
+    var forceScroller = false
 
     @State private var draft = ""
     @State private var pulse = false
     @State private var headerH: CGFloat = 0
     @State private var askH: CGFloat = 0
+    @State private var scrollOffset: CGFloat = 0
+    @State private var viewportH: CGFloat = 0
+    @State private var showScroller = false
+    @State private var hoveringScroller = false
+    @State private var hideToken = 0
     @FocusState private var typing: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    /// Explicit, opaque surface. A semantic/material colour resolved against whatever app was
+    /// behind the panel, so secondary text lost contrast over dark windows.
+    private var surface: Color {
+        scheme == .dark ? Color(white: 0.135) : Color(white: 0.985)
+    }
 
     private var listening: Bool { capture.state == .listening }
     static let expandedSize = NSSize(width: 440, height: 430)
@@ -187,14 +207,37 @@ struct OverlayView: View {
                             Color.clear.frame(height: 1).id("bottom")
                         }
                         .padding(.vertical, 10)
-                        .padding(.trailing, 4)
+                        .padding(.trailing, 10)
                         .background(GeometryReader { g in
-                            Color.clear.preference(key: OverlayContentHeight.self, value: g.size.height)
+                            Color.clear
+                                .preference(key: OverlayContentHeight.self, value: g.size.height)
+                                .preference(key: OverlayScrollOffset.self,
+                                            value: -g.frame(in: .named("overlayScroll")).minY)
                         })
                     }
-                    // The system scroller in a 440 pt panel looked wrong: a permanent bar over
-                    // the rounded card. Content auto-follows instead.
+                    // The OS scroller looked wrong in a 440 pt panel: a permanent grey bar drawn
+                    // over the rounded card. This is the design-system recipe instead — thin,
+                    // translucent, overlay, fades in on scroll, hidden when content fits.
                     .scrollIndicators(.hidden)
+                    .coordinateSpace(name: "overlayScroll")
+                    .mask(
+                        VStack(spacing: 0) {
+                            Rectangle()
+                            LinearGradient(colors: [.black, .black.opacity(0)],
+                                           startPoint: .top, endPoint: .bottom)
+                                .frame(height: 20)
+                        }
+                    )
+                    .overlay(alignment: .topTrailing) { scroller }
+                    .background(GeometryReader { g in
+                        Color.clear.onAppear { viewportH = g.size.height }
+                            .onChange(of: g.size.height) { _, h in viewportH = h }
+                    })
+                    .onPreferenceChange(OverlayScrollOffset.self) { value in
+                        scrollOffset = value
+                        markScrolling()
+                    }
+                    .onHover { hoveringScroller = $0 }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onPreferenceChange(OverlayContentHeight.self) { h in
                         if abs(model.contentHeight - h) > 0.5 { model.contentHeight = h }
@@ -228,7 +271,7 @@ struct OverlayView: View {
                    ? Self.expandedHeight(content: model.contentHeight, chrome: model.chromeHeight)
                    : Self.collapsedSize.height,
                alignment: .topLeading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Brand.overlayRadius, style: .continuous))
+        .background(surface, in: RoundedRectangle(cornerRadius: Brand.overlayRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Brand.overlayRadius, style: .continuous)
                 .strokeBorder(Brand.line, lineWidth: 1)
@@ -289,6 +332,40 @@ struct OverlayView: View {
         }
     }
 
+    /// Thin overlay thumb: 4 pt at rest, 6 pt on hover, 28 pt minimum length, 3 pt from the
+    /// edge. Appears while scrolling or hovering, fades out 1.2 s after you stop.
+    @ViewBuilder
+    private var scroller: some View {
+        let content = max(model.contentHeight, 1)
+        let viewport = max(viewportH, 1)
+        let ratio = min(1, viewport / content)
+        if ratio < 0.995 {
+            let thumbH = max(28, viewport * ratio)
+            let travel = max(1, viewport - thumbH)
+            let maxOffset = max(1, content - viewport)
+            let progress = min(1, max(0, scrollOffset / maxOffset))
+            Capsule()
+                .fill(Color.secondary.opacity(hoveringScroller ? 0.55 : 0.35))
+                .frame(width: hoveringScroller ? 6 : 4, height: thumbH)
+                .offset(y: progress * travel)
+                .padding(.trailing, 3)
+                .opacity(showScroller || hoveringScroller || forceScroller ? 1 : 0)
+                .animation(.easeOut(duration: 0.18), value: showScroller)
+                .animation(.easeOut(duration: 0.12), value: hoveringScroller)
+                .animation(.easeOut(duration: 0.12), value: scrollOffset)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func markScrolling() {
+        showScroller = true
+        hideToken += 1
+        let token = hideToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if token == hideToken { showScroller = false }
+        }
+    }
+
     /// 28 pt outer padding + header + two hairlines + the ask row.
     private func publishChrome() {
         let chrome = 28 + headerH + 2 + askH
@@ -339,7 +416,7 @@ struct OverlayView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text(summaryLine)
+                    Text(ChatThreadView.styled(summaryLine))
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(4)
                         .truncationMode(.tail)
@@ -379,7 +456,7 @@ struct OverlayView: View {
                 } else if model.catchUp.isEmpty {
                     Text("Catch up on what was said before you started paying attention.")
                 } else {
-                    Text(model.catchUp)
+                    Text(ChatThreadView.styled(model.catchUp))
                         .textSelection(.enabled)
                 }
             }

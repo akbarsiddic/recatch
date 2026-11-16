@@ -25,6 +25,7 @@ enum Brand {
     static let cardRadius: CGFloat = 16
     /// Large radius for the floating overlay.
     static let overlayRadius: CGFloat = 20
+
 }
 
 /// Branded panel/window header: mark + name + live status pill.

@@ -118,7 +118,7 @@ enum SelfTest {
         // layout can be reviewed without a live meeting.
         let stub = OverlayModel()
         stub.now = "Now: Budi asking how the 4 juta estimate price relates to MOQ."
-        stub.catchUp = "Summary\n- Formulasi quoted 4 juta per 10.000 units (0:44)\n- MOQ vs estimate price still unresolved (1:07)\nOpen questions\n- Which volume does the price assume? (1:38)"
+        stub.catchUp = "**Summary**\n- Formulasi quoted 4 juta per 10.000 units (0:44)\n- MOQ vs estimate price still unresolved (1:07)\n**Open questions**\n- Which volume does the price assume? (1:38)"
         stub.chat = [.init(question: "What price did they agree on?",
                            answer: "4 juta per 10.000 units, quoted by the formulation department (0:44).")]
         // Regression: the Ask field was untypable because a borderless NSPanel refuses key
@@ -151,6 +151,23 @@ enum SelfTest {
             .padding(20)
             .background(Color(white: 0.10)),
             name: "chat-dashboard")
+
+        // Overflowing content: the panel clamps at its ceiling and the custom scroller appears.
+        let long = OverlayModel()
+        long.now = "Now: the team is working through the quotation for the formulation, comparing the estimate price with the MOQ for each volume tier."
+        long.catchUp = (1...12).map { "- Point \($0): the formulation team quoted four million per ten thousand units (0:\(40 + $0))" }
+            .joined(separator: "\n")
+        long.chat = [.init(question: "What price did they agree on?",
+                           answer: "4 juta per 10.000 units, quoted by the formulation department (0:44).")]
+        captureHosted(
+            OverlayView(model: long, capture: AudioCaptureManager.shared, onHide: {}, forceScroller: true)
+                .padding(18).background(Color(white: 0.10)), name: "overlay-scroll")
+
+        stub.expanded = true
+        captureHosted(
+            OverlayView(model: stub, capture: AudioCaptureManager.shared, onHide: {})
+                .environment(\.colorScheme, .dark)
+                .padding(18).background(Color(white: 0.06)), name: "overlay-dark")
 
         let short = OverlayModel()
         short.now = "Now: approving the price for the formulation."
