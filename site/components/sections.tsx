@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useLang } from "@/lib/i18n";
 import Reveal from "./Reveal";
 import VoxelSprite from "./VoxelSprite";
+import DemoStage from "./Demo";
 
 const DL = "https://github.com/akbarsiddic/recatch/releases/latest";
 const GH = "https://github.com/akbarsiddic/recatch";
@@ -58,24 +59,7 @@ export function Hero() {
               <b>{id ? "Gratis & sumber terbuka" : "Free & open source"}</b> · Apple Silicon · macOS 14+
             </p>
           </div>
-          <div className="hero-visual">
-            <VoxelSprite name="logo" scale={3.2} className="hero-sprite" />
-            <div className="frame">
-              <Image
-                src="/assets/overlay.png"
-                alt="The recatch floating panel: a live NOW summary, a catch-up summary, and an Ask chat"
-                width={952}
-                height={886}
-                priority
-              />
-            </div>
-            <div className="caption">
-              <b>recatch</b>{" "}
-              {id
-                ? "melayang di atas rapatmu — ringkasan langsung, bukan tembok kata."
-                : "floats over your meeting — a live summary, not a wall of words."}
-            </div>
-          </div>
+          <DemoStage />
         </div>
       </div>
     </section>
@@ -102,7 +86,10 @@ export function HowItWorks() {
         <div className="steps">
           <Reveal>
             <div className="step">
-              <span className="no">01</span>
+              <div className="step-top">
+                <span className="no">01</span>
+                <VoxelSprite name="wave" scale={1.5} />
+              </div>
               <h3>{id ? "Mulai mendengarkan" : "Start listening"}</h3>
               <p>
                 {id
@@ -113,7 +100,10 @@ export function HowItWorks() {
           </Reveal>
           <Reveal>
             <div className="step">
-              <span className="no">02</span>
+              <div className="step-top">
+                <span className="no">02</span>
+                <VoxelSprite name="clock" scale={1.5} />
+              </div>
               <h3>{id ? "Kejar ketinggalan kapan saja" : "Catch up anytime"}</h3>
               <p>
                 {id ? (
@@ -126,7 +116,10 @@ export function HowItWorks() {
           </Reveal>
           <Reveal>
             <div className="step">
-              <span className="no">03</span>
+              <div className="step-top">
+                <span className="no">03</span>
+                <VoxelSprite name="chat" scale={1.5} />
+              </div>
               <h3>{id ? "Tanya rapatnya" : "Ask the meeting"}</h3>
               <p>
                 {id
@@ -202,34 +195,67 @@ export function Features() {
 }
 
 /* --------------------------------- Privacy --------------------------------- */
+function PrivacyIcon({ name }: { name: "lock" | "shield" | "clock" | "key" }) {
+  if (name === "lock") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <rect x="5" y="11" width="14" height="9" rx="2" />
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+      </svg>
+    );
+  }
+  if (name === "shield") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3l7 3v5c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V6l7-3z" />
+        <path d="M9 12l2 2 4-4" />
+      </svg>
+    );
+  }
+  if (name === "clock") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 7.5V12l3 2" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7.5" cy="15.5" r="3.5" />
+      <path d="M10.5 12.5L19 4M14.5 8.5l2 2" />
+    </svg>
+  );
+}
+
 export function Privacy() {
   const lang = useLang();
   const id = lang === "id";
-  const facts = [
+  const facts: { icon: "lock" | "shield" | "clock" | "key"; title: string; body: string; wide?: boolean }[] = [
     {
-      sprite: "lock" as const,
+      icon: "lock",
       title: id ? "Audio tidak pernah keluar dari Mac kamu." : "Audio never leaves your Mac.",
       body: id ? "Pengenalan suara berjalan di perangkat dengan Whisper." : "Speech recognition runs on-device with Whisper.",
     },
     {
-      sprite: "shield" as const,
+      icon: "shield",
       title: id ? "Tanpa bot, tanpa akun." : "No bots, no accounts.",
       body: id ? "Tidak ada yang bergabung ke panggilanmu dan tidak ada yang diunggah." : "Nothing joins your call and nothing is uploaded.",
     },
     {
-      sprite: "clock" as const,
+      icon: "clock",
       title: id ? "Hanya yang kamu tanyakan yang dikirim." : "Only what you ask is sent.",
       body: id
         ? "Potongan transkrip dikirim ke penyedia pilihanmu — dicatat lokal berdasarkan waktu dan ukuran, tidak pernah isinya."
         : "The transcript window goes to the provider you choose — logged locally by time and size, never content.",
     },
     {
-      sprite: "key" as const,
+      icon: "key",
       title: id ? "Transkrip kedaluwarsa." : "Transcripts expire.",
       body: id ? "Disimpan lokal, dihapus setelah 3 hari secara bawaan." : "Stored locally, deleted after 3 days by default.",
     },
     {
-      sprite: "shield" as const,
+      icon: "shield",
       title: id ? "Kunci tetap di Keychain kamu." : "Keys stay in your Keychain.",
       body: id ? "Tidak pernah di preferensi atau log." : "Never in preferences or logs.",
       wide: true,
@@ -251,7 +277,7 @@ export function Privacy() {
             {facts.map((f, i) => (
               <li key={i} className={f.wide ? "wide" : undefined}>
                 <span className="ic">
-                  <VoxelSprite name={f.sprite} />
+                  <PrivacyIcon name={f.icon} />
                 </span>
                 <span>
                   <b>{f.title}</b> {f.body}

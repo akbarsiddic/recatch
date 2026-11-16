@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useLang } from "@/lib/i18n";
 import Wordmark from "./Wordmark";
 
-export default function Demo() {
+export default function DemoStage() {
   const lang = useLang();
   const id = lang === "id";
 
@@ -126,80 +126,62 @@ export default function Demo() {
   }, [id]);
 
   return (
-    <section className="sec" id="demo" style={{ paddingTop: 8 }}>
-      <div className="wrap">
-        <div className="sec-head center">
-          <h2>{id ? "Lihat langsung." : "See it in action."}</h2>
-          <p className="lead">
-            {id
-              ? "Beginilah recatch saat rapat sungguhan — kursor memainkan alurnya: kejar ketinggalan, lalu bertanya."
-              : "This is recatch during a real meeting — the cursor plays through the flow: catch up, then ask."}
-          </p>
-        </div>
-
-        <div className="demo-stage" ref={stageRef}>
-          <div className="demo-cursor" ref={cursorRef} aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24">
-              <path d="M4 2l16 9-7 2-3 7z" fill="#1B1620" stroke="#FBF8F1" strokeWidth="1.8" strokeLinejoin="round" />
-            </svg>
-            <i className="demo-ring" />
-          </div>
-
-          <div className="demo-panel">
-            <div className="demo-head">
-              <span className="wm" style={{ height: 15 }}>
-                <Wordmark />
-              </span>
-              <span className="demo-pill">
-                <span className="dot" />
-                {id ? "Mendengarkan 0:32" : "Listening 0:32"}
-              </span>
-            </div>
-
-            <div className="demo-body">
-              <div className="demo-now">
-                <span className="demo-lbl">{id ? "Sekarang" : "Right now"}</span>
-                <p>{id ? "Priya sedang membahas jadwal rilis kuartal tiga." : "Priya is walking through the Q3 launch timeline."}</p>
-              </div>
-
-              <div className="demo-summary">
-                <div className="demo-summary-head">
-                  <span className="demo-lbl">{id ? "Kejar ketinggalan" : "Catch me up"}</span>
-                  <button className="demo-catch" ref={catchRef} aria-label="Catch me up">
-                    ↻
-                  </button>
-                </div>
-                <div className="demo-summary-body" ref={summaryRef}>
-                  <b>{id ? "Rilis pindah ke 12 September" : "Launch moved to September 12"}</b>{" "}
-                  {id
-                    ? "(12:04) · Desain dibekukan — naskah masih menunggu (12:18)"
-                    : "(12:04) · Design freeze approved — copy still pending (12:18)"}
-                </div>
-              </div>
-
-              <div className="demo-chat">
-                <div className="demo-q" ref={qRef} />
-                <div className="demo-a" ref={aRef} />
-              </div>
-
-              <div className="demo-ask" ref={askRef}>
-                <span className="demo-ask-field ph" ref={fieldRef} data-ph="">
-                  {id ? "Tanya soal rapat…" : "Ask about the meeting…"}
-                </span>
-                <button className="demo-send" ref={sendRef} aria-label="Send">
-                  ↵
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <p className="note" style={{ textAlign: "center", maxWidth: 520, margin: "24px auto 0" }}>
-          {id
-            ? "Video rekaman asli akan menggantikan demo animasi ini di sini."
-            : "The recorded walkthrough video will live right here, in place of this animated demo."}
-        </p>
+    <div className="demo-stage" ref={stageRef}>
+      <div className="demo-cursor" ref={cursorRef} aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24">
+          <path d="M4 2l16 9-7 2-3 7z" fill="#1B1620" stroke="#FBF8F1" strokeWidth="1.8" strokeLinejoin="round" />
+        </svg>
+        <i className="demo-ring" />
       </div>
-    </section>
+
+      <div className="demo-panel">
+        <span className="demo-tag">{id ? "Contoh" : "Demo"}</span>
+        <div className="demo-head">
+          <span className="wm" style={{ height: 15 }}>
+            <Wordmark />
+          </span>
+          <span className="demo-pill">
+            <span className="dot" />
+            {id ? "Mendengarkan 0:32" : "Listening 0:32"}
+          </span>
+        </div>
+
+        <div className="demo-body">
+          <div className="demo-now">
+            <span className="demo-lbl">{id ? "Sekarang" : "Right now"}</span>
+            <p>{id ? "Priya sedang membahas jadwal rilis kuartal tiga." : "Priya is walking through the Q3 launch timeline."}</p>
+          </div>
+
+          <div className="demo-summary">
+            <div className="demo-summary-head">
+              <span className="demo-lbl">{id ? "Kejar ketinggalan" : "Catch me up"}</span>
+              <button className="demo-catch" ref={catchRef} aria-label="Catch me up">
+                ↻
+              </button>
+            </div>
+            <div className="demo-summary-body" ref={summaryRef}>
+              <b>{id ? "Rilis pindah ke 12 September" : "Launch moved to September 12"}</b>{" "}
+              {id
+                ? "(12:04) · Desain dibekukan — naskah masih menunggu (12:18)"
+                : "(12:04) · Design freeze approved — copy still pending (12:18)"}
+            </div>
+          </div>
+
+          <div className="demo-chat">
+            <div className="demo-q" ref={qRef} />
+            <div className="demo-a" ref={aRef} />
+          </div>
+
+          <div className="demo-ask" ref={askRef}>
+            <span className="demo-ask-field ph" ref={fieldRef}>
+              {id ? "Tanya soal rapat…" : "Ask about the meeting…"}
+            </span>
+            <button className="demo-send" ref={sendRef} aria-label="Send">
+              ↵
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

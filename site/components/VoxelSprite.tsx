@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-type SpriteName = "logo" | "lock" | "shield" | "clock" | "key";
+type SpriteName = "logo" | "lock" | "shield" | "clock" | "key" | "wave" | "chat";
 
 const d = (x: number, y: number, a: number, b: number) => Math.hypot(x - a, y - b);
 
@@ -17,6 +17,31 @@ const SPRITES: Record<SpriteName, { n: number; h: number; p: Voxel[] }> = {
       [(x, y, z) => { const r = d(x, y, 14, 16); return z === 12 && r >= 8.5 && r <= 11.5 && Math.abs(Math.atan2(y - 16, x - 14)) > 0.85; }, "#FF8A6E"],
       [(x, y, z) => { const a = x - 25.2, b = y - 16, c = z - 6; return a * a + b * b + c * c <= 32; }, "#FFD23F"],
       [(x, y, z) => { const a = x - 24.2, b = y - 15, c = z - 8; return a * a + b * b + c * c <= 9; }, "#FFF3B0"],
+    ],
+  },
+  wave: {
+    n: 20,
+    h: 8,
+    p: [
+      [(x, y) => {
+        const bars: [number, number, number][] = [[3, 5, 8], [6, 8, 13], [9, 11, 16], [12, 14, 12], [15, 17, 9]];
+        for (const [x0, x1, hgt] of bars) {
+          if (x >= x0 && x < x1 && y >= 16 - hgt && y <= 16) return true;
+        }
+        return false;
+      }, "#FF5A36"],
+    ],
+  },
+  chat: {
+    n: 20,
+    h: 8,
+    p: [
+      [(x, y) => {
+        if (x >= 3 && x <= 17 && y >= 6 && y <= 15) return true;
+        if (y > 15 && y <= 18 && x >= 3 && x <= 5 + (18 - y)) return true;
+        return false;
+      }, "#74E0F2"],
+      [(x, y, z) => z === 7 && [[7, 9], [10, 9], [13, 9]].some((c) => x >= c[0] && x < c[0] + 2 && y >= c[1] && y < c[1] + 2), "#FFFFFF"],
     ],
   },
   lock: {
