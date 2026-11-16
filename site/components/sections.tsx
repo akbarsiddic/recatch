@@ -59,10 +59,7 @@ export function Hero() {
               <b>{id ? "Gratis & sumber terbuka" : "Free & open source"}</b> · Apple Silicon · macOS 14+
             </p>
           </div>
-          <div className="hero-stage">
-            <VoxelSprite name="logo" scale={2.4} className="hero-sprite" />
-            <DemoStage />
-          </div>
+          <DemoStage />
         </div>
       </div>
     </section>

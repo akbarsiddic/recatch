@@ -1,7 +1,7 @@
 "use client";
 
 import { useLang, setLang } from "@/lib/i18n";
-import Wordmark from "./Wordmark";
+import VoxelSprite from "./VoxelSprite";
 
 const DL = "https://github.com/akbarsiddic/recatch/releases/latest";
 
@@ -12,8 +12,8 @@ export default function Header() {
   return (
     <header>
       <div className="wrap">
-        <a href="#top" aria-label="recatch" className="wm">
-          <Wordmark />
+        <a href="#top" aria-label="recatch">
+          <VoxelSprite name="wordmark" scale={1.3} className="nav-wm" />
         </a>
         <nav>
           <a href="#how">{t ? "Cara kerja" : "How it works"}</a>
