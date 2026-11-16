@@ -1,19 +1,33 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { useLang, setLang } from "@/lib/i18n";
 import VoxelSprite from "./VoxelSprite";
 
 const DL = "https://github.com/akbarsiddic/recatch/releases/latest";
 
+function useDarkMode() {
+  return useSyncExternalStore(
+    (cb) => {
+      const mq = matchMedia("(prefers-color-scheme: dark)");
+      mq.addEventListener("change", cb);
+      return () => mq.removeEventListener("change", cb);
+    },
+    () => matchMedia("(prefers-color-scheme: dark)").matches,
+    () => false
+  );
+}
+
 export default function Header() {
   const lang = useLang();
   const t = lang === "id";
+  const dark = useDarkMode();
 
   return (
     <header>
       <div className="wrap">
         <a href="#top" aria-label="recatch">
-          <VoxelSprite name="wordmark" scale={1.3} className="nav-wm" />
+          <VoxelSprite name="wordmark" scale={1.3} className="nav-wm" color={dark ? "#F7F2E8" : "#1B1620"} />
         </a>
         <nav>
           <a href="#how">{t ? "Cara kerja" : "How it works"}</a>

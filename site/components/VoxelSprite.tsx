@@ -126,10 +126,12 @@ export default function VoxelSprite({
   name,
   scale = 2.2,
   className = "",
+  color,
 }: {
   name: SpriteName;
   scale?: number;
   className?: string;
+  color?: string;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -157,7 +159,7 @@ export default function VoxelSprite({
         V[z][y] = [];
         for (let x = 0; x < n; x++) {
           let c: string | null = null;
-          for (const [fn, col] of o.p) if (fn(x + 0.5, y + 0.5, z)) c = col;
+          for (const [fn, col] of o.p) if (fn(x + 0.5, y + 0.5, z)) c = color ?? col;
           V[z][y][x] = c;
         }
       }
@@ -288,7 +290,7 @@ export default function VoxelSprite({
       cv.removeEventListener("pointerenter", enter);
       cv.removeEventListener("pointerleave", leave);
     };
-  }, [name, scale]);
+  }, [name, scale, color]);
 
   return <canvas ref={ref} className={className} aria-hidden="true" />;
 }
