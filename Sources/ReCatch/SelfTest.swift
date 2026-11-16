@@ -117,10 +117,10 @@ enum SelfTest {
         // Overlay: summary + inline Ask chat, no captions. Rendered with stub content so the
         // layout can be reviewed without a live meeting.
         let stub = OverlayModel()
-        stub.now = "Now: Budi asking how the 4 juta estimate price relates to MOQ."
-        stub.catchUp = "**Summary**\n- Formulasi quoted 4 juta per 10.000 units (0:44)\n- MOQ vs estimate price still unresolved (1:07)\n**Open questions**\n- Which volume does the price assume? (1:38)"
-        stub.chat = [.init(question: "What price did they agree on?",
-                           answer: "4 juta per 10.000 units, quoted by the formulation department (0:44).")]
+        stub.now = "Now: Priya is walking through the Q3 launch timeline."
+        stub.catchUp = "**Summary**\n- Launch moved to September 12 (12:04)\n- Design freeze approved, copy still pending (12:18)\n**Open questions**\n- Who owns the pricing page? (12:41)"
+        stub.chat = [.init(question: "What did Priya ask me to do?",
+                           answer: "Confirm the September 12 launch date with the design team (12:22).")]
         // Regression: the Ask field was untypable because a borderless NSPanel refuses key
         // status. Assert the real panel class can hold the keyboard.
         let probe = OverlayPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
@@ -137,19 +137,19 @@ enum SelfTest {
             captureHosted(
                 OverlayView(model: stub, capture: AudioCaptureManager.shared, onHide: {})
                     .padding(18)
-                    .background(Color(white: 0.10)),
+                    .background(Color(red: 0.984, green: 0.973, blue: 0.945)),
                 name: name)
         }
         captureHosted(
             ChatThreadView(turns: [
-                .init(question: "What price did they agree on?",
-                      answer: "4 juta per 10.000 units, quoted by the formulation department (0:44)."),
+                .init(question: "What did Priya ask me to do?",
+                      answer: "Confirm the September 12 launch date with the design team (12:22)."),
                 .init(question: "What did I miss?",
-                      answer: "**Summary**\n- Formulasi quoted 4 juta per 10.000 units (0:44)\n- MOQ vs estimate price still unresolved (1:07)\n**Open questions**\n- Which volume does the price assume? (1:38)"),
+                      answer: "**Summary**\n- Launch moved to September 12 (12:04)\n- Design freeze approved, copy still pending (12:18)\n**Open questions**\n- Who owns the pricing page? (12:41)"),
             ])
             .frame(width: 720, alignment: .leading)
             .padding(20)
-            .background(Color(white: 0.10)),
+            .background(Color(red: 0.984, green: 0.973, blue: 0.945)),
             name: "chat-dashboard")
 
         // Overflowing content: the panel clamps at its ceiling and the custom scroller appears.
@@ -161,7 +161,7 @@ enum SelfTest {
                            answer: "4 juta per 10.000 units, quoted by the formulation department (0:44).")]
         captureHosted(
             OverlayView(model: long, capture: AudioCaptureManager.shared, onHide: {})
-                .padding(18).background(Color(white: 0.10)), name: "overlay-scroll")
+                .padding(18).background(Color(red: 0.984, green: 0.973, blue: 0.945)), name: "overlay-scroll")
 
         stub.expanded = true
         captureHosted(
@@ -198,9 +198,9 @@ enum SelfTest {
         let short = OverlayModel()
         short.now = "Now: approving the price for the formulation."
         captureHosted(OverlayView(model: short, capture: AudioCaptureManager.shared, onHide: {})
-            .padding(18).background(Color(white: 0.10)), name: "overlay-short")
+            .padding(18).background(Color(red: 0.984, green: 0.973, blue: 0.945)), name: "overlay-short")
         captureHosted(OverlayView(model: OverlayModel(), capture: AudioCaptureManager.shared, onHide: {})
-            .padding(18).background(Color(white: 0.10)), name: "overlay-empty")
+            .padding(18).background(Color(red: 0.984, green: 0.973, blue: 0.945)), name: "overlay-empty")
         // Onboarding sheet, rendered on its own.
         if let img = ImageRenderer(content: OnboardingView(isPresented: .constant(true))
             .frame(width: 620, height: 560)).nsImage,

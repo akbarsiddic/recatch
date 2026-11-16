@@ -5,9 +5,9 @@ enum Brand {
     static let name = "ReCatch"
     static let tagline = "Never ask “what did I miss?” again."
 
-    /// Deep lagoon teal — reads on light and dark.
-    static let accent = Color(red: 0.04, green: 0.52, blue: 0.51)
-    static let accentSoft = Color(red: 0.04, green: 0.52, blue: 0.51).opacity(0.12)
+    /// Brand coral #FF5A36 — reads on light and dark.
+    static let accent = Color(red: 1.0, green: 0.353, blue: 0.212)
+    static let accentSoft = Color(red: 1.0, green: 0.353, blue: 0.212).opacity(0.12)
     static let warn = Color.orange
     static let bad = Color.red
     static let ok = Color.green
