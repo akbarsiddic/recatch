@@ -94,13 +94,21 @@ final class StatusItemController: NSObject {
     private func render(_ state: AppState) {
         guard let button = item?.button else { return }
         let meta = AppStateDisplay.meta(for: state)
-        let symbol = state == .listening ? "waveform" : meta.icon
-        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: Brand.name)
-        img?.isTemplate = true
-        button.image = img
+        button.image = menuBarImage(listening: state == .listening)
         // Listening gets a word; everything else stays a quiet icon.
         button.title = state == .listening ? "  Listening" : ""
         button.toolTip = "\(Brand.name) — \(meta.title)"
+    }
+
+    /// The brand menu-bar mark: the coral arc, plus a dot while listening.
+    private func menuBarImage(listening: Bool) -> NSImage? {
+        let base = listening ? "recatchMenuBarListening" : "recatchMenuBarIdle"
+        let url = Bundle.main.url(forResource: base + "@2x", withExtension: "png")
+            ?? Bundle.main.url(forResource: base, withExtension: "png")
+        guard let url, let img = NSImage(contentsOfFile: url.path) else { return nil }
+        img.isTemplate = true
+        img.size = NSSize(width: 18, height: 18)
+        return img
     }
 
     @objc private func handleClick() {

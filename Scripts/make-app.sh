@@ -25,6 +25,8 @@ if [[ -f Resources/AppIcon.icns ]]; then
 else
   echo "    (no icon yet — run: python3 Scripts/make-icon.py)"
 fi
+# Menu-bar icons (idle arc / listening arc+dot) for the status item.
+cp Resources/recatchMenuBar*.png "$APP/Contents/Resources/" 2>/dev/null || true
 
 # Ad-hoc signature gives the bundle a stable identity so macOS remembers the
 # Microphone / Screen Recording grants across launches.

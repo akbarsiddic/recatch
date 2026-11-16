@@ -84,14 +84,7 @@ struct ChatThreadView: View {
     }
 
     private var mark: some View {
-        Circle()
-            .fill(Brand.accent)
-            .frame(width: compact ? 15 : 18, height: compact ? 15 : 18)
-            .overlay(
-                Image(systemName: "waveform")
-                    .font(.system(size: compact ? 7 : 8, weight: .bold))
-                    .foregroundStyle(.white)
-            )
+        BrandMark(size: compact ? 16 : 20)
             .padding(.top, 1)
     }
 

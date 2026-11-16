@@ -91,7 +91,7 @@ struct DashboardView: View {
             Spacer()
             Divider()
             HStack(spacing: 6) {
-                Image(systemName: "waveform.circle.fill").foregroundStyle(Brand.accent)
+                BrandMark(size: 18)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(Brand.name).font(.caption).bold()
                     Text(version).font(.system(size: 9)).foregroundColor(.secondary)

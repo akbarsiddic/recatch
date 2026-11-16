@@ -11,6 +11,8 @@ enum Brand {
     static let warn = Color.orange
     static let bad = Color.red
     static let ok = Color.green
+    /// Brand yellow #FFD23F — the dot in the ReCatch mark.
+    static let yellow = Color(red: 1.0, green: 0.824, blue: 0.247)
     static let radius: CGFloat = 12
 
     // MARK: - Surfaces
@@ -28,16 +30,33 @@ enum Brand {
 
 }
 
+/// The ReCatch mark — a coral three-quarter arc with a yellow dot in the opening.
+struct BrandMark: View {
+    var size: CGFloat = 24
+    var tint: Color = Brand.accent
+    var body: some View {
+        ZStack {
+            Circle()
+                .trim(from: 0.12, to: 0.88)
+                .stroke(tint, style: StrokeStyle(lineWidth: size * 0.26, lineCap: .round))
+                .padding(size * 0.14)
+            Circle()
+                .fill(Brand.yellow)
+                .frame(width: size * 0.22, height: size * 0.22)
+                .offset(x: size * 0.24)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
 /// Branded panel/window header: mark + name + live status pill.
 struct BrandHeader: View {
     var status: String
     var tone: Color = Brand.accent
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.title2)
-                .foregroundStyle(tone)
-                .accessibilityHidden(true)
+            BrandMark(size: 22, tint: tone)
             VStack(alignment: .leading, spacing: 0) {
                 Text(Brand.name).font(.headline)
                 Text(Brand.tagline).font(.caption).foregroundColor(.secondary)

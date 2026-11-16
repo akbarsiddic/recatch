@@ -47,7 +47,7 @@ struct OnboardingView: View {
     private var header: some View {
         VStack(spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: "waveform.circle.fill").font(.title2).foregroundStyle(Brand.accent)
+                BrandMark(size: 22)
                 Text(Brand.name).font(.headline)
                 Text("· \(steps[step])").font(.headline).foregroundColor(.secondary)
                 Spacer()
