@@ -28,6 +28,8 @@ final class AudioCaptureManager: ObservableObject {
     @Published var modelProgress: Double = 0
     /// Language detected once for this meeting ("Bahasa Indonesia"), nil while unknown.
     @Published var detectedLanguageTitle: String?
+    /// Wall-clock start of the current meeting, for the overlay's elapsed timer.
+    @Published private(set) var meetingStartedAt: Date?
 
     var onChunk: (@Sendable (AudioChunk) -> Void)?
     var onSegment: (@Sendable (TranscriptSegment) -> Void)?
@@ -102,6 +104,7 @@ final class AudioCaptureManager: ObservableObject {
             return
         }
         meetingId = mid
+        meetingStartedAt = Date()
 
         // Rolling transcriber → partial captions + settled segments.
         rolling.config = .init()
@@ -401,6 +404,7 @@ final class AudioCaptureManager: ObservableObject {
         mixer.reset()
         if let mid = meetingId, let st = store { try? st.endMeeting(id: mid) }
         meetingId = nil
+        meetingStartedAt = nil
         store = nil
         clock.stop()
         state = .idle

@@ -114,6 +114,21 @@ enum SelfTest {
             try? png.write(to: URL(fileURLWithPath: path))
             log("shots: \(path) \(rep.pixelsWide)x\(rep.pixelsHigh)")
         }
+        // Overlay: summary + inline Ask chat, no captions. Rendered with stub content so the
+        // layout can be reviewed without a live meeting.
+        let stub = OverlayModel()
+        stub.now = "Now: Budi asking how the 4 juta estimate price relates to MOQ."
+        stub.catchUp = "Summary\n- Formulasi quoted 4 juta per 10.000 units (0:44)\n- MOQ vs estimate price still unresolved (1:07)\nOpen questions\n- Which volume does the price assume? (1:38)"
+        stub.chat = [.init(question: "What price did they agree on?",
+                           answer: "4 juta per 10.000 units, quoted by the formulation department (0:44).")]
+        for (name, expanded) in [("overlay", true), ("overlay-collapsed", false)] {
+            stub.expanded = expanded
+            captureHosted(
+                OverlayView(model: stub, capture: AudioCaptureManager.shared, onHide: {})
+                    .padding(18)
+                    .background(Color(white: 0.10)),
+                name: name)
+        }
         // Onboarding sheet, rendered on its own.
         if let img = ImageRenderer(content: OnboardingView(isPresented: .constant(true))
             .frame(width: 620, height: 560)).nsImage,
@@ -123,6 +138,32 @@ enum SelfTest {
             log("shots: /tmp/pane-onboarding.png")
         }
         exit(0)
+    }
+
+
+    /// Renders a SwiftUI view inside a real window and caches it. `ImageRenderer` silently
+    /// drops ScrollView content and paints Menu/TextField as unsupported placeholders, so
+    /// anything with real controls has to go through a window to be reviewable.
+    @MainActor
+    private static func captureHosted<V: View>(_ content: V, name: String) {
+        let host = NSHostingView(rootView: content)
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        window.setContentSize(size)
+        window.orderFrontRegardless()
+        host.layoutSubtreeIfNeeded()
+        if let v = window.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+            v.cacheDisplay(in: v.bounds, to: rep)
+            if let png = rep.representation(using: .png, properties: [:]) {
+                let path = "/tmp/\(name).png"
+                try? png.write(to: URL(fileURLWithPath: path))
+                log("shots: \(path) \(rep.pixelsWide)x\(rep.pixelsHigh)")
+            }
+        }
+        window.orderOut(nil)
     }
 
     private static func runLive(seconds: Double) async {
@@ -152,6 +193,20 @@ enum SelfTest {
             let err = await MainActor.run { panel.errorMessage ?? panel.emptyReason }
             log("\(label): \(answer.isEmpty ? "<empty> (\(err ?? "no reason"))" : answer)")
         }
+        // The overlay's own model: same two answers, plus the inline chat.
+        let overlay = await MainActor.run { OverlayModel() }
+        await overlay.refreshNow()
+        let nowLine = await MainActor.run { overlay.now }
+        log("OVERLAY NOW: \(nowLine.isEmpty ? "<empty>" : nowLine)")
+        await MainActor.run { overlay.ask("What price was mentioned?") }
+        for _ in 0..<60 {
+            let busy = await MainActor.run { overlay.asking }
+            if !busy { break }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        let answer = await MainActor.run { overlay.chat.last?.answer ?? "" }
+        log("OVERLAY ASK: \(answer.isEmpty ? "<empty>" : answer)")
+
         await capture.stopMeeting()
     }
 
