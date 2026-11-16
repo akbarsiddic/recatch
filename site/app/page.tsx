@@ -1,0 +1,33 @@
+import Header from "@/components/Header";
+import Cursor from "@/components/Cursor";
+import Footer from "@/components/Footer";
+import {
+  Hero,
+  FeaturedOn,
+  HowItWorks,
+  Features,
+  Privacy,
+  BringYourOwnBrain,
+  Download,
+  Faq,
+} from "@/components/sections";
+
+export default function Page() {
+  return (
+    <>
+      <Header />
+      <main id="top">
+        <Hero />
+        <FeaturedOn />
+        <HowItWorks />
+        <Features />
+        <Privacy />
+        <BringYourOwnBrain />
+        <Download />
+        <Faq />
+      </main>
+      <Footer />
+      <Cursor />
+    </>
+  );
+}
