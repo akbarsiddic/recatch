@@ -100,15 +100,14 @@ export default function VoxelSprite({
     if (!cv || !o) return;
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    // Generous bounds so the isometric stack (and its float) never clips at the top.
-    const W = Math.ceil(o.n * scale * 1.45);
-    const H = Math.ceil(o.n * scale * 0.95 + o.h * scale * 1.15 + 16);
-    cv.width = W * dpr;
-    cv.height = H * dpr;
-    cv.style.width = `${W}px`;
-    cv.style.height = `${H}px`;
+    const k = scale * dpr;
+    const squash = 0.6;
+    const angle = 0.55;
+    const st = k * (1.22 - squash) * 0.95;
+    const co = Math.cos(angle);
+    const si = Math.sin(angle);
 
-    // Build the voxel grid once.
+    // Build the voxel grid.
     const V: (string | null)[][][] = [];
     for (let z = 0; z < o.h; z++) {
       V[z] = [];
@@ -121,6 +120,34 @@ export default function VoxelSprite({
         }
       }
     }
+
+    // Project every filled voxel center to find the tight bounds (device px).
+    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+    for (let z = 0; z < o.h; z++) {
+      for (let y = 0; y < o.n; y++) {
+        for (let x = 0; x < o.n; x++) {
+          if (!V[z][y][x]) continue;
+          const px = x + 0.5 - o.n / 2;
+          const py = (y + 0.5 - o.n / 2) * squash;
+          const rx = (px * co - py * si) * k;
+          const ry = (px * si + py * co) * k - z * st;
+          if (rx < minx) minx = rx;
+          if (rx > maxx) maxx = rx;
+          if (ry < miny) miny = ry;
+          if (ry > maxy) maxy = ry;
+        }
+      }
+    }
+
+    const pad = Math.ceil(k) + 10 * dpr;
+    const W = Math.max(4, Math.ceil((maxx - minx + 2 * pad) / dpr));
+    const H = Math.max(4, Math.ceil((maxy - miny + 2 * pad) / dpr));
+    cv.width = W * dpr;
+    cv.height = H * dpr;
+    cv.style.width = `${W}px`;
+    cv.style.height = `${H}px`;
+
+    // Shade the layers.
     const layers: HTMLCanvasElement[] = [];
     for (let z = 0; z < o.h; z++) {
       const layer = document.createElement("canvas");
@@ -145,12 +172,8 @@ export default function VoxelSprite({
     }
 
     const ctx = cv.getContext("2d")!;
-    const k = scale * dpr;
-    const squash = 0.6;
-    const angle = 0.55;
-    const st = k * (1.22 - squash) * 0.95;
-    const cx = (W * dpr) / 2;
-    const cy = H * dpr - o.n * k * squash * 0.5 - 8 * dpr;
+    const ox = pad - minx;
+    const oy = pad - miny;
     const sub = Math.max(1, Math.ceil(st / dpr));
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let lift = 0, tlift = 0;
@@ -160,15 +183,18 @@ export default function VoxelSprite({
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, cv.width, cv.height);
       ctx.imageSmoothingEnabled = false;
-      ctx.fillStyle = "rgba(25,22,19,.18)";
+
+      // Ground shadow, under the front edge.
+      ctx.fillStyle = "rgba(25,22,19,.14)";
       ctx.beginPath();
-      ctx.ellipse(cx + 2 * dpr, cy + 2 * dpr, o.n * k * 0.36, o.n * k * 0.36 * squash, 0, 0, 6.3);
+      ctx.ellipse(ox + (minx + maxx) / 2 + 2 * dpr, oy + maxy + 2 * dpr, (maxx - minx) * 0.36, (maxx - minx) * 0.36 * squash, 0, 0, 6.3);
       ctx.fill();
+
       for (let z = 0; z < o.h; z++) {
         for (let m = 0; m < sub; m++) {
           const oz = (z + m / sub) * st + lift * dpr;
           ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.translate(cx, cy - oz);
+          ctx.translate(ox, oy - oz);
           ctx.scale(1, squash);
           ctx.rotate(angle);
           ctx.drawImage(layers[z], (-o.n * k) / 2, (-o.n * k) / 2, o.n * k, o.n * k);
