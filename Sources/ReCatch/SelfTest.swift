@@ -121,6 +121,17 @@ enum SelfTest {
         stub.catchUp = "Summary\n- Formulasi quoted 4 juta per 10.000 units (0:44)\n- MOQ vs estimate price still unresolved (1:07)\nOpen questions\n- Which volume does the price assume? (1:38)"
         stub.chat = [.init(question: "What price did they agree on?",
                            answer: "4 juta per 10.000 units, quoted by the formulation department (0:44).")]
+        // Regression: the Ask field was untypable because a borderless NSPanel refuses key
+        // status. Assert the real panel class can hold the keyboard.
+        let probe = OverlayPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+                                 styleMask: [.borderless, .nonactivatingPanel],
+                                 backing: .buffered, defer: false)
+        probe.orderFrontRegardless()
+        probe.makeKey()
+        log("shots: overlay panel canBecomeKey=\(probe.canBecomeKey) isKey=\(probe.isKeyWindow)")
+        probe.orderOut(nil)
+
+        // Full, short and empty: proves the height clamps instead of stretching or voiding.
         for (name, expanded) in [("overlay", true), ("overlay-collapsed", false)] {
             stub.expanded = expanded
             captureHosted(
@@ -129,6 +140,12 @@ enum SelfTest {
                     .background(Color(white: 0.10)),
                 name: name)
         }
+        let short = OverlayModel()
+        short.now = "Now: approving the price for the formulation."
+        captureHosted(OverlayView(model: short, capture: AudioCaptureManager.shared, onHide: {})
+            .padding(18).background(Color(white: 0.10)), name: "overlay-short")
+        captureHosted(OverlayView(model: OverlayModel(), capture: AudioCaptureManager.shared, onHide: {})
+            .padding(18).background(Color(white: 0.10)), name: "overlay-empty")
         // Onboarding sheet, rendered on its own.
         if let img = ImageRenderer(content: OnboardingView(isPresented: .constant(true))
             .frame(width: 620, height: 560)).nsImage,
@@ -172,6 +189,20 @@ enum SelfTest {
         await capture.startMeeting()
         log("live: listening for \(Int(seconds))s — play audio now")
         try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+
+        // The live overlay, timer included — the only way to see it with a running clock.
+        if ProcessInfo.processInfo.environment["RECATCH_SELFTEST_SHOTS"] == "1" {
+            await MainActor.run { OverlayController.shared.showIfListening() }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if let v = await MainActor.run(body: { OverlayController.shared.testPanelView() }),
+               let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(fileURLWithPath: "/tmp/overlay-live.png"))
+                    log("shots: /tmp/overlay-live.png \(rep.pixelsWide)x\(rep.pixelsHigh)")
+                }
+            }
+        }
 
         let segs = await MainActor.run { capture.segmentCount }
         let transcript = await MainActor.run { capture.transcriptWindow(secondsBack: 0) }
@@ -236,6 +267,20 @@ enum SelfTest {
             if n > 0 { break }
         }
         log("model line: \(await MainActor.run { capture.modelLine })")
+        // The live overlay, timer included — the only way to see it with a running clock.
+        if ProcessInfo.processInfo.environment["RECATCH_SELFTEST_SHOTS"] == "1" {
+            await MainActor.run { OverlayController.shared.showIfListening() }
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if let v = await MainActor.run(body: { OverlayController.shared.testPanelView() }),
+               let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                v.cacheDisplay(in: v.bounds, to: rep)
+                if let png = rep.representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(fileURLWithPath: "/tmp/overlay-live.png"))
+                    log("shots: /tmp/overlay-live.png \(rep.pixelsWide)x\(rep.pixelsHigh)")
+                }
+            }
+        }
+
         let segs = await MainActor.run { capture.segmentCount }
         log("segments stored: \(segs)")
         let transcript = await MainActor.run { capture.transcriptWindow(secondsBack: 0) }
