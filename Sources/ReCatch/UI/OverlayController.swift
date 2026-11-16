@@ -7,17 +7,11 @@ import Combine
 /// summary — plus an inline Ask chat, so a question never costs a window switch.
 @MainActor
 final class OverlayModel: ObservableObject {
-    struct Turn: Identifiable {
-        let id = UUID()
-        let question: String
-        var answer: String
-    }
-
     /// Live one-or-two-line summary, refreshed on a timer.
     @Published var now: String = ""
     /// Fuller catch-up ("what did I miss"), only on demand.
     @Published var catchUp: String = ""
-    @Published var chat: [Turn] = []
+    @Published var chat: [ChatTurn] = []
     @Published var isLoadingNow = false
     @Published var isLoadingCatchUp = false
     @Published var asking = false
@@ -26,6 +20,9 @@ final class OverlayModel: ObservableObject {
     /// Height of the scrollable content, measured by the view. The panel clamps to it so it is
     /// neither a void when the summary is short nor unbounded when the catch-up is long.
     @Published var contentHeight: CGFloat = 0
+    /// Measured header + ask row + padding. A guessed constant left a visible void under short
+    /// content, because the real chrome is not a fixed number.
+    @Published var chromeHeight: CGFloat = 116
 
     private var autoTask: Task<Void, Never>?
     private var catchTask: Task<Void, Never>?
@@ -93,7 +90,7 @@ final class OverlayModel: ObservableObject {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         askTask?.cancel()
-        chat.append(Turn(question: q, answer: ""))
+        chat.append(ChatTurn(question: q))
         let index = chat.count - 1
         asking = true
         error = nil
@@ -107,10 +104,8 @@ final class OverlayModel: ObservableObject {
                 }
             } catch is CancellationError {
             } catch {
-                self.error = Self.describe(error)
-                if self.chat.indices.contains(index), self.chat[index].answer.isEmpty {
-                    self.chat.remove(at: index)
-                }
+                let message = Self.describe(error)
+                if self.chat.indices.contains(index) { self.chat[index].error = message }
             }
         }
     }
@@ -126,6 +121,16 @@ final class OverlayModel: ObservableObject {
     }
 }
 
+private struct OverlayHeaderHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct OverlayAskHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 private struct OverlayContentHeight: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -138,18 +143,17 @@ struct OverlayView: View {
 
     @State private var draft = ""
     @State private var pulse = false
+    @State private var headerH: CGFloat = 0
+    @State private var askH: CGFloat = 0
     @FocusState private var typing: Bool
 
     private var listening: Bool { capture.state == .listening }
     static let expandedSize = NSSize(width: 440, height: 430)
     static let collapsedSize = NSSize(width: 320, height: 84)
-    /// Header + divider + ask row + padding: everything that is not the scrolling content.
-    static let chromeHeight: CGFloat = 102
-
     /// Content-sized, clamped. 180 pt floor so a one-line summary still looks deliberate;
     /// 430 pt ceiling so a long catch-up scrolls instead of stretching the panel.
-    static func expandedHeight(content: CGFloat) -> CGFloat {
-        min(max(180, chromeHeight + content), expandedSize.height)
+    static func expandedHeight(content: CGFloat, chrome: CGFloat) -> CGFloat {
+        min(max(180, chrome + content), expandedSize.height)
     }
 
     /// `.now` answers arrive as "Now: …". The card is already labelled, so drop the prefix.
@@ -164,25 +168,33 @@ struct OverlayView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header.padding(.bottom, 8)
+            header
+                .padding(.bottom, 8)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: OverlayHeaderHeight.self, value: g.size.height)
+                })
             if model.expanded {
                 Divider().opacity(0.4)
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 8) {
-                            summaryCard
-                            if !model.catchUp.isEmpty { catchUpCard }
-                            if !model.chat.isEmpty { chatThread }
+                        VStack(alignment: .leading, spacing: 14) {
+                            nowSection
+                            summarySection
+                            if !model.chat.isEmpty { chatSection }
                             if let e = model.error {
                                 Text(e).font(.system(size: 11)).foregroundStyle(Brand.warn).lineLimit(2)
                             }
                             Color.clear.frame(height: 1).id("bottom")
                         }
-                        .padding(.top, 8)
+                        .padding(.vertical, 10)
+                        .padding(.trailing, 4)
                         .background(GeometryReader { g in
                             Color.clear.preference(key: OverlayContentHeight.self, value: g.size.height)
                         })
                     }
+                    // The system scroller in a 440 pt panel looked wrong: a permanent bar over
+                    // the rounded card. Content auto-follows instead.
+                    .scrollIndicators(.hidden)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onPreferenceChange(OverlayContentHeight.self) { h in
                         if abs(model.contentHeight - h) > 0.5 { model.contentHeight = h }
@@ -194,7 +206,12 @@ struct OverlayView: View {
                         withAnimation(.snappy(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
                     }
                 }
-                askRow.padding(.top, 8)
+                Divider().opacity(0.4)
+                askRow
+                    .padding(.top, 8)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: OverlayAskHeight.self, value: g.size.height)
+                    })
             } else if !summaryLine.isEmpty {
                 Text(summaryLine)
                     .font(.system(size: 12))
@@ -208,7 +225,7 @@ struct OverlayView: View {
         // Fixed, not content-sized: a long summary must scroll, not stretch the panel.
         .frame(width: model.expanded ? Self.expandedSize.width : Self.collapsedSize.width,
                height: model.expanded
-                   ? Self.expandedHeight(content: model.contentHeight)
+                   ? Self.expandedHeight(content: model.contentHeight, chrome: model.chromeHeight)
                    : Self.collapsedSize.height,
                alignment: .topLeading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Brand.overlayRadius, style: .continuous))
@@ -219,6 +236,8 @@ struct OverlayView: View {
         .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
         .animation(.snappy(duration: 0.18), value: model.expanded)
         .animation(.snappy(duration: 0.18), value: model.chat.count)
+        .onPreferenceChange(OverlayHeaderHeight.self) { h in headerH = h; publishChrome() }
+        .onPreferenceChange(OverlayAskHeight.self) { h in askH = h; publishChrome() }
         .onAppear {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
         }
@@ -270,6 +289,12 @@ struct OverlayView: View {
         }
     }
 
+    /// 28 pt outer padding + header + two hairlines + the ask row.
+    private func publishChrome() {
+        let chrome = 28 + headerH + 2 + askH
+        if abs(model.chromeHeight - chrome) > 0.5 { model.chromeHeight = chrome }
+    }
+
     private static func clock(_ seconds: Int) -> String {
         let s = max(0, seconds)
         return String(format: "%d:%02d", s / 60, s % 60)
@@ -295,41 +320,83 @@ struct OverlayView: View {
         .help("Meeting language")
     }
 
-    private var summaryCard: some View {
+    /// NOW: what the meeting is about at this moment. Accent-tinted so it never reads as
+    /// the same block as the summary below it.
+    private var nowSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text("NOW")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Brand.accent)
-                    .tracking(0.8)
+                SectionLabel(title: "Now", compact: true)
+                if model.isLoadingNow { BrandDots() }
+                Spacer()
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                if summaryLine.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        skeletonBar(fraction: 0.94)
+                        skeletonBar(fraction: 0.62)
+                        Text(listening ? "Waiting for speech…" : "Not listening")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(summaryLine)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(4)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                if let note = capture.systemNote {
+                    Text(note).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Brand.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Brand.accent.opacity(0.18), lineWidth: 1)
+            )
+        }
+    }
+
+    /// SUMMARY: the catch-up, on demand. The button lives here permanently so it is always
+    /// reachable, not only after a summary already exists.
+    private var summarySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                SectionLabel(title: "Summary", compact: true)
                 Spacer()
                 catchMeUpButton
             }
-            if summaryLine.isEmpty {
-                // Skeleton instead of a dead sentence: it reads as "working", not "stuck".
-                VStack(alignment: .leading, spacing: 6) {
-                    skeletonBar(fraction: 0.94)
-                    skeletonBar(fraction: 0.62)
-                    Text(listening ? "Waiting for speech…" : "Not listening")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+            Group {
+                if model.isLoadingCatchUp && model.catchUp.isEmpty {
+                    HStack(spacing: 6) {
+                        BrandDots()
+                        Text("Reading the last few minutes…")
+                    }
+                } else if model.catchUp.isEmpty {
+                    Text("Catch up on what was said before you started paying attention.")
+                } else {
+                    Text(model.catchUp)
+                        .textSelection(.enabled)
                 }
-            } else {
-                Text(summaryLine)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(4)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
             }
-            if let note = capture.systemNote {
-                Text(note).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-            }
+            .font(.system(size: 11))
+            .foregroundStyle(model.catchUp.isEmpty ? .secondary : .primary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Brand.raised.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Brand.raised.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var chatSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(title: "Chat", compact: true)
+            ChatThreadView(turns: Array(model.chat.suffix(2)), compact: true)
+        }
     }
 
     private func skeletonBar(fraction: CGFloat) -> some View {
@@ -367,40 +434,6 @@ struct OverlayView: View {
         .foregroundStyle(Brand.accent)
         .disabled(model.isLoadingCatchUp)
         .help("Summarise the last few minutes")
-    }
-
-    private var catchUpCard: some View {
-        Text(model.catchUp)
-            .font(.system(size: 11))
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-            .padding(10)
-            .background(Brand.raised.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    /// The last two exchanges. Chat here is ephemeral — you ask, you read, you go back.
-    private var chatThread: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(model.chat.suffix(2))) { turn in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(turn.question)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if turn.answer.isEmpty {
-                        BrandDots()
-                    } else {
-                        Text(turn.answer)
-                            .font(.system(size: 12))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
     }
 
     private var askRow: some View {
@@ -493,13 +526,13 @@ final class OverlayController: ObservableObject {
         // Height follows the clamped content height, so the panel never grows past its ceiling
         // and never sits as a half-empty box either.
         model.$expanded
-            .combineLatest(model.$contentHeight)
+            .combineLatest(model.$contentHeight, model.$chromeHeight)
             .receive(on: RunLoop.main)
-            .sink { [weak self] expanded, content in
+            .sink { [weak self] expanded, content, chrome in
                 guard let self, let p = self.panel else { return }
                 let width = expanded ? OverlayView.expandedSize.width : OverlayView.collapsedSize.width
                 let height = expanded
-                    ? OverlayView.expandedHeight(content: content)
+                    ? OverlayView.expandedHeight(content: content, chrome: chrome)
                     : OverlayView.collapsedSize.height
                 guard abs(p.frame.width - width) > 1 || abs(p.frame.height - height) > 1 else { return }
                 p.setContentSize(NSSize(width: width, height: height))

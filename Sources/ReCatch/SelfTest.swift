@@ -140,6 +140,18 @@ enum SelfTest {
                     .background(Color(white: 0.10)),
                 name: name)
         }
+        captureHosted(
+            ChatThreadView(turns: [
+                .init(question: "What price did they agree on?",
+                      answer: "4 juta per 10.000 units, quoted by the formulation department (0:44)."),
+                .init(question: "What did I miss?",
+                      answer: "**Summary**\n- Formulasi quoted 4 juta per 10.000 units (0:44)\n- MOQ vs estimate price still unresolved (1:07)\n**Open questions**\n- Which volume does the price assume? (1:38)"),
+            ])
+            .frame(width: 720, alignment: .leading)
+            .padding(20)
+            .background(Color(white: 0.10)),
+            name: "chat-dashboard")
+
         let short = OverlayModel()
         short.now = "Now: approving the price for the formulation."
         captureHosted(OverlayView(model: short, capture: AudioCaptureManager.shared, onHide: {})
