@@ -1,9 +1,9 @@
 import Header from "@/components/Header";
 import Cursor from "@/components/Cursor";
 import Footer from "@/components/Footer";
+import Demo from "@/components/Demo";
 import {
   Hero,
-  FeaturedOn,
   HowItWorks,
   Features,
   Privacy,
@@ -18,7 +18,7 @@ export default function Page() {
       <Header />
       <main id="top">
         <Hero />
-        <FeaturedOn />
+        <Demo />
         <HowItWorks />
         <Features />
         <Privacy />

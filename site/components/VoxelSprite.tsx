@@ -75,8 +75,9 @@ export default function VoxelSprite({
     if (!cv || !o) return;
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const W = Math.ceil(o.n * scale);
-    const H = Math.ceil(o.n * scale * 0.5 + o.h * scale);
+    // Generous bounds so the isometric stack (and its float) never clips at the top.
+    const W = Math.ceil(o.n * scale * 1.45);
+    const H = Math.ceil(o.n * scale * 0.95 + o.h * scale * 1.15 + 16);
     cv.width = W * dpr;
     cv.height = H * dpr;
     cv.style.width = `${W}px`;
@@ -120,32 +121,38 @@ export default function VoxelSprite({
 
     const ctx = cv.getContext("2d")!;
     const k = scale * dpr;
+    const squash = 0.6;
+    const angle = 0.55;
+    const st = k * (1.22 - squash) * 0.95;
     const cx = (W * dpr) / 2;
-    const cy = H * dpr - o.n * k * 0.5 * 0.82 * 1.1;
+    const cy = H * dpr - o.n * k * squash * 0.5 - 8 * dpr;
+    const sub = Math.max(1, Math.ceil(st / dpr));
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let angle = 0.5, squash = 0.82, lift = 0, hov = false, tlift = 0;
+    let lift = 0, tlift = 0;
     const phase = Math.random() * 6.28;
 
     const draw = () => {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, cv.width, cv.height);
       ctx.imageSmoothingEnabled = false;
-      ctx.fillStyle = "rgba(27,22,19,.14)";
+      ctx.fillStyle = "rgba(25,22,19,.18)";
       ctx.beginPath();
-      ctx.ellipse(cx + 2 * dpr, cy + 3 * dpr, o.n * k * 0.34, o.n * k * 0.34 * squash, 0, 0, 6.3);
+      ctx.ellipse(cx + 2 * dpr, cy + 2 * dpr, o.n * k * 0.36, o.n * k * 0.36 * squash, 0, 0, 6.3);
       ctx.fill();
       for (let z = 0; z < o.h; z++) {
-        const oz = z * k * squash * 0.98 + lift * dpr;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.translate(cx, cy - oz);
-        ctx.scale(1, squash);
-        ctx.rotate(angle);
-        ctx.drawImage(layers[z], (-o.n * k) / 2, (-o.n * k) / 2, o.n * k, o.n * k);
+        for (let m = 0; m < sub; m++) {
+          const oz = (z + m / sub) * st + lift * dpr;
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.translate(cx, cy - oz);
+          ctx.scale(1, squash);
+          ctx.rotate(angle);
+          ctx.drawImage(layers[z], (-o.n * k) / 2, (-o.n * k) / 2, o.n * k, o.n * k);
+        }
       }
     };
 
-    const enter = () => { hov = true; tlift = 4; };
-    const leave = () => { hov = false; tlift = 0; };
+    const enter = () => { tlift = 6; };
+    const leave = () => { tlift = 0; };
     cv.addEventListener("pointerenter", enter);
     cv.addEventListener("pointerleave", leave);
 
@@ -153,9 +160,7 @@ export default function VoxelSprite({
     if (!reduced) {
       const frame = (t: number) => {
         const idle = Math.sin(t / 1400 + phase) * 2.4;
-        lift += (idle + tlift - lift) * 0.08;
-        squash += (0.82 + (hov ? 0.06 : 0) - squash) * 0.1;
-        angle += (0.5 + (hov ? 0.22 : 0) - angle) * 0.08;
+        lift += (idle + tlift - lift) * 0.14;
         draw();
         raf = requestAnimationFrame(frame);
       };
@@ -171,5 +176,5 @@ export default function VoxelSprite({
     };
   }, [name, scale]);
 
-  return <canvas ref={ref} data-s={name} className={className} aria-hidden="true" />;
+  return <canvas ref={ref} className={className} aria-hidden="true" />;
 }

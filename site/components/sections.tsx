@@ -8,6 +8,19 @@ import VoxelSprite from "./VoxelSprite";
 const DL = "https://github.com/akbarsiddic/recatch/releases/latest";
 const GH = "https://github.com/akbarsiddic/recatch";
 
+function Brand({ src, alt, size = 16 }: { src: string; alt: string; size?: number }) {
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      width={size}
+      height={size}
+      unoptimized
+      style={{ objectFit: "contain" }}
+    />
+  );
+}
+
 /* ---------------------------------- Hero ---------------------------------- */
 export function Hero() {
   const lang = useLang();
@@ -63,24 +76,6 @@ export function Hero() {
                 : "floats over your meeting — a live summary, not a wall of words."}
             </div>
           </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ------------------------------- Featured on ------------------------------- */
-export function FeaturedOn() {
-  const lang = useLang();
-  return (
-    <section className="featured">
-      <div className="wrap">
-        <div className="label">{lang === "id" ? "Diliput oleh" : "Featured on"}</div>
-        <div className="featured-row">
-          <span>Launch Llama Tools</span>
-          <span>Twelve Tools</span>
-          <span>Smol Launch</span>
-          <span>ShipNLaunch</span>
         </div>
       </div>
     </section>
@@ -275,22 +270,20 @@ export function BringYourOwnBrain() {
   const lang = useLang();
   const id = lang === "id";
   const rows = [
-    { nm: "Claude Pro", sub: id ? "skrip & penalaran" : "scripts & reasoning", pr: "$20/mo" },
-    { nm: "ChatGPT Plus", sub: id ? "chat & penalaran" : "chat & reasoning", pr: "$20/mo" },
-    { nm: "Groq", sub: id ? "inferensi cepat" : "fast inference", pr: id ? "pemakaian" : "usage" },
-    { nm: "DeepSeek", sub: id ? "penalaran" : "reasoning", pr: id ? "pemakaian" : "usage" },
+    { nm: "Claude Pro", sub: id ? "skrip & penalaran" : "scripts & reasoning", pr: "$20/mo", logo: "/brands/claude.svg" },
+    { nm: "ChatGPT Plus", sub: id ? "chat & penalaran" : "chat & reasoning", pr: "$20/mo", logo: "/brands/openai.svg" },
+    { nm: "Groq", sub: id ? "inferensi cepat" : "fast inference", pr: id ? "pemakaian" : "usage", logo: "/brands/groq.svg" },
+    { nm: "DeepSeek", sub: id ? "penalaran" : "reasoning", pr: id ? "pemakaian" : "usage", logo: "/brands/deepseek.svg" },
   ];
   const chips = [
-    "Groq",
-    "Claude Code",
-    "opencode",
-    "Gemini CLI",
-    "Codex",
-    "DeepSeek",
-    "OpenAI",
-    "Anthropic",
-    "Ollama",
-    id ? "endpoint kompatibel OpenAI apa pun" : "any OpenAI-compatible endpoint",
+    { name: "Groq", logo: "/brands/groq.svg" },
+    { name: "Claude Code", logo: "/brands/claude.svg" },
+    { name: "opencode", logo: "/brands/opencode.svg" },
+    { name: "Gemini CLI", logo: "/brands/googlegemini.svg" },
+    { name: "Codex", logo: "/brands/openai.svg" },
+    { name: "DeepSeek", logo: "/brands/deepseek.svg" },
+    { name: "OpenAI", logo: "/brands/openai.svg" },
+    { name: id ? "endpoint kompatibel OpenAI apa pun" : "any OpenAI-compatible endpoint", logo: null },
   ];
   return (
     <section className="sec" id="brain">
@@ -309,10 +302,15 @@ export function BringYourOwnBrain() {
             <div className="brain-list">
               {rows.map((r) => (
                 <div className="brain-item" key={r.nm}>
-                  <span className="nm">
-                    {r.nm}
-                    <small>{r.sub}</small>
-                  </span>
+                  <div className="brain-left">
+                    <span className="brain-logo">
+                      <Brand src={r.logo} alt={r.nm} />
+                    </span>
+                    <span className="nm">
+                      {r.nm}
+                      <small>{r.sub}</small>
+                    </span>
+                  </div>
                   <span className="pr">{r.pr}</span>
                 </div>
               ))}
@@ -340,7 +338,10 @@ export function BringYourOwnBrain() {
         </div>
         <div className="chips" style={{ justifyContent: "center" }}>
           {chips.map((c) => (
-            <span key={c}>{c}</span>
+            <span key={c.name}>
+              {c.logo ? <Brand src={c.logo} alt={c.name} /> : null}
+              {c.name}
+            </span>
           ))}
         </div>
       </div>
