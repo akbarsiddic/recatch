@@ -160,7 +160,7 @@ enum SelfTest {
         long.chat = [.init(question: "What price did they agree on?",
                            answer: "4 juta per 10.000 units, quoted by the formulation department (0:44).")]
         captureHosted(
-            OverlayView(model: long, capture: AudioCaptureManager.shared, onHide: {}, forceScroller: true)
+            OverlayView(model: long, capture: AudioCaptureManager.shared, onHide: {})
                 .padding(18).background(Color(white: 0.10)), name: "overlay-scroll")
 
         stub.expanded = true
@@ -168,6 +168,32 @@ enum SelfTest {
             OverlayView(model: stub, capture: AudioCaptureManager.shared, onHide: {})
                 .environment(\.colorScheme, .dark)
                 .padding(18).background(Color(white: 0.06)), name: "overlay-dark")
+
+        // Is the overlay's ScrollView actually backed by an NSScrollView we can style?
+        do {
+            let probe = OverlayModel()
+            probe.expanded = true
+            probe.catchUp = (1...12).map { "- line \($0)" }.joined(separator: "\n")
+            let host = NSHostingView(rootView: OverlayView(model: probe, capture: AudioCaptureManager.shared, onHide: {}))
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 430),
+                             styleMask: [.borderless], backing: .buffered, defer: false)
+            w.contentView = host
+            w.orderFrontRegardless()
+            host.layoutSubtreeIfNeeded()
+            func findScroll(_ v: NSView) -> NSScrollView? {
+                if let s = v as? NSScrollView { return s }
+                for sub in v.subviews { if let s = findScroll(sub) { return s } }
+                return nil
+            }
+            if let scroll = findScroll(host) {
+                log("shots: native scroller before=\(scroll.scrollerStyle.rawValue) (\(scroll.scrollerStyle == .overlay ? "overlay" : "legacy"))")
+                NativeScroller.configure(host)
+                log("shots: native scroller after=\(scroll.scrollerStyle.rawValue) (\(scroll.scrollerStyle == .overlay ? "overlay" : "legacy")) autohide=\(scroll.autohidesScrollers)")
+            } else {
+                log("shots: native scroller NOT found — SwiftUI is not using NSScrollView")
+            }
+            w.orderOut(nil)
+        }
 
         let short = OverlayModel()
         short.now = "Now: approving the price for the formulation."
